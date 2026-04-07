@@ -1,0 +1,17 @@
+{
+    "name": "coysh/crm",
+    "description": "Coysh Digital CRM",
+    "type": "project",
+    "require": {
+        "php": ">=8.2",
+        "bramus/router": "^1.6"
+    },
+    "autoload": {
+        "psr-4": {
+            "CoyshCRM\\": "src/"
+        }
+    },
+    "config": {
+        "optimize-autoloader": true
+    }
+}

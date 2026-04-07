@@ -1,0 +1,25 @@
+# Dependencies
+vendor/
+
+# Database — contains all client data and FreeAgent OAuth tokens
+data/*.db
+data/*.db-shm
+data/*.db-wal
+
+# Environment / secrets
+.env
+.env.local
+.env.*.local
+
+# AI assistant config
+.claude/
+
+# macOS
+.DS_Store
+
+# IDE
+.idea/
+.vscode/
+
+# Logs
+*.log
