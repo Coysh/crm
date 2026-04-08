@@ -43,8 +43,8 @@ class PloiService
     {
         $user = $this->getAuthenticatedUser();
         return [
-            'ok' => true,
-            'name' => $user['name'] ?? ($user['full_name'] ?? 'Unknown'),
+            'ok'    => true,
+            'name'  => $user['name'] ?? ($user['full_name'] ?? 'Unknown'),
             'email' => $user['email'] ?? null,
         ];
     }
@@ -54,7 +54,8 @@ class PloiService
         $ploi = $this->sdk();
         try {
             $response = $ploi->user()->get();
-            return $response['data'] ?? $response;
+            $data = $response->getData();
+            return $data ? (array) $data : [];
         } catch (Throwable $e) {
             throw new RuntimeException('Unable to validate Ploi token: ' . $e->getMessage());
         }

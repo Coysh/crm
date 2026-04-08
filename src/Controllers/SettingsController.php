@@ -28,13 +28,20 @@ class SettingsController
         $ploiConnected = $this->ploi->isConnected();
 
         $ploiStats = [
-            'servers_total' => (int)$this->db->query("SELECT COUNT(*) FROM ploi_servers")->fetchColumn(),
-            'servers_linked' => (int)$this->db->query("SELECT COUNT(*) FROM ploi_servers WHERE server_id IS NOT NULL")->fetchColumn(),
-            'sites_total' => (int)$this->db->query("SELECT COUNT(*) FROM ploi_sites")->fetchColumn(),
-            'sites_linked' => (int)$this->db->query("SELECT COUNT(*) FROM ploi_sites WHERE client_site_id IS NOT NULL")->fetchColumn(),
-            'unlinked_servers' => $this->db->query("SELECT name FROM ploi_servers WHERE server_id IS NULL ORDER BY name LIMIT 8")->fetchAll(PDO::FETCH_COLUMN),
-            'unlinked_sites' => $this->db->query("SELECT domain FROM ploi_sites WHERE client_site_id IS NULL ORDER BY domain LIMIT 8")->fetchAll(PDO::FETCH_COLUMN),
-            'last_error' => $this->db->query("SELECT * FROM ploi_sync_log WHERE status = 'failed' ORDER BY started_at DESC LIMIT 1")->fetch() ?: null,
+            'servers_total'    => (int)$this->db->query("SELECT COUNT(*) FROM ploi_servers")->fetchColumn(),
+            'sites_total'      => (int)$this->db->query("SELECT COUNT(*) FROM ploi_sites")->fetchColumn(),
+            'sites_linked'     => (int)$this->db->query(
+                "SELECT COUNT(*) FROM ploi_sites ps
+                 JOIN client_sites cs ON cs.id = ps.client_site_id
+                 WHERE cs.client_id IS NOT NULL"
+            )->fetchColumn(),
+            'unlinked_sites'   => $this->db->query(
+                "SELECT ps.domain FROM ploi_sites ps
+                 LEFT JOIN client_sites cs ON cs.id = ps.client_site_id
+                 WHERE cs.id IS NULL OR cs.client_id IS NULL
+                 ORDER BY ps.domain LIMIT 8"
+            )->fetchAll(PDO::FETCH_COLUMN),
+            'last_error'       => $this->db->query("SELECT * FROM ploi_sync_log WHERE status = 'failed' ORDER BY started_at DESC LIMIT 1")->fetch() ?: null,
         ];
 
         render('settings.index', compact('faCfg', 'connected', 'ploiCfg', 'ploiConnected', 'ploiStats'), 'Settings');
@@ -99,7 +106,13 @@ class SettingsController
         try {
             $sync = new PloiSync($this->db, $this->ploi);
             $results = $sync->fullSync();
-            flash('success', "Ploi sync complete. Servers: {$results['servers']}, Sites: {$results['sites']}");
+            $msg = "Ploi sync complete. Servers: {$results['servers']}, Sites: {$results['sites']}";
+            if (!empty($results['errors'])) {
+                $msg .= ' (partial — ' . implode('; ', $results['errors']) . ')';
+                flash('warning', $msg);
+            } else {
+                flash('success', $msg);
+            }
         } catch (\Throwable $e) {
             flash('error', 'Ploi sync failed: ' . $e->getMessage());
         }

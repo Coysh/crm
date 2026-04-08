@@ -95,6 +95,10 @@ class ServerController
     {
         $server = $this->model->findById($id);
         if ($server) {
+            // Unlink from ploi_servers, clear from client_sites, then delete
+            $this->db->prepare("UPDATE ploi_servers SET server_id = NULL WHERE server_id = ?")->execute([$id]);
+            $this->db->prepare("UPDATE client_sites SET server_id = NULL WHERE server_id = ?")->execute([$id]);
+            $this->db->prepare("UPDATE expenses SET server_id = NULL WHERE server_id = ?")->execute([$id]);
             $this->model->delete($id);
             flash('success', "Server '{$server['name']}' deleted.");
         }

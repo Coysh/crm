@@ -16,10 +16,9 @@
             <a href="/settings/ploi" class="text-sm text-accent-600 hover:underline mt-3 inline-block">Manage Ploi →</a>
 
             <div class="mt-4 text-xs text-slate-600 space-y-1">
-                <p><?= $ploiStats['servers_linked'] ?> of <?= $ploiStats['servers_total'] ?> Ploi servers linked</p>
-                <?php if ($ploiStats['unlinked_servers']): ?><p>Unlinked: <?= e(implode(', ', $ploiStats['unlinked_servers'])) ?></p><?php endif ?>
-                <p><?= $ploiStats['sites_linked'] ?> of <?= $ploiStats['sites_total'] ?> Ploi sites linked</p>
-                <?php if ($ploiStats['unlinked_sites']): ?><p>Unlinked: <?= e(implode(', ', $ploiStats['unlinked_sites'])) ?></p><?php endif ?>
+                <p><?= $ploiStats['servers_total'] ?> servers synced (auto-created in CRM)</p>
+                <p><?= $ploiStats['sites_linked'] ?> of <?= $ploiStats['sites_total'] ?> sites assigned to a client</p>
+                <?php if ($ploiStats['unlinked_sites']): ?><p class="text-amber-600">Unassigned: <?= e(implode(', ', $ploiStats['unlinked_sites'])) ?><?= count($ploiStats['unlinked_sites']) === 8 ? '…' : '' ?></p><?php endif ?>
                 <?php if (!empty($ploiCfg['last_sync_at'])): ?><p>Last sync: <?= formatDate($ploiCfg['last_sync_at']) ?></p><?php endif ?>
                 <?php if ($ploiStats['last_error']): ?><p class="text-red-600">Last error: <?= e($ploiStats['last_error']['error_message']) ?></p><?php endif ?>
             </div>

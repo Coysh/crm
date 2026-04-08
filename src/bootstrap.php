@@ -12,6 +12,7 @@ require BASE_PATH . '/vendor/autoload.php';
 // Error handling
 ini_set('display_errors', '1');
 error_reporting(E_ALL);
+ini_set('max_execution_time', '120'); // Allow longer execution for API syncs
 
 // Session for flash messages
 if (session_status() === PHP_SESSION_NONE) {
