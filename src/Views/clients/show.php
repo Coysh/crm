@@ -141,6 +141,7 @@ if (isset($db)) {
                         <th class="px-4 py-2 text-left">SMTP</th>
                         <th class="px-4 py-2 text-left">Server</th>
                         <th class="px-4 py-2 text-center">CI/CD</th>
+                        <th class="px-4 py-2 text-left">Ploi</th>
                         <th class="px-4 py-2"></th>
                     </tr>
                 </thead>
@@ -159,6 +160,21 @@ if (isset($db)) {
                             <td class="px-4 py-2 text-slate-500"><?= e($s['smtp_service'] ?: '—') ?></td>
                             <td class="px-4 py-2 text-slate-500"><?= e($s['server_name'] ?: '—') ?></td>
                             <td class="px-4 py-2 text-center"><?= $s['has_deployment_pipeline'] ? '<span class="text-green-500">✓</span>' : '<span class="text-slate-300">—</span>' ?></td>
+                            <td class="px-4 py-2 text-xs">
+                                <?php if (!empty($s['ploi_domain'])): ?>
+                                    <details>
+                                        <summary class="cursor-pointer text-accent-600">Ploi Site Details</summary>
+                                        <div class="mt-1 text-slate-600 space-y-0.5">
+                                            <div>Domain: <?= e($s['ploi_domain']) ?></div>
+                                            <div>Type: <?= e($s['ploi_project_type'] ?: '—') ?> · PHP <?= e($s['ploi_php_version'] ?: '—') ?></div>
+                                            <div>Repo: <?= e($s['ploi_repository'] ?: '—') ?> <?= $s['ploi_branch'] ? ('@ ' . e($s['ploi_branch'])) : '' ?></div>
+                                            <div>SSL: <?= !empty($s['ploi_has_ssl']) ? 'Yes' : 'No' ?> · Web dir: <?= e($s['ploi_web_directory'] ?: '—') ?></div>
+                                            <?php if (!empty($s['ploi_test_domain'])): ?><div>Test: <?= e($s['ploi_test_domain']) ?></div><?php endif ?>
+                                            <div>Status: <?= e($s['ploi_status'] ?: '—') ?><?= !empty($s['ploi_is_stale']) ? ' (stale)' : '' ?></div>
+                                        </div>
+                                    </details>
+                                <?php else: ?>—<?php endif ?>
+                            </td>
                             <td class="px-4 py-2 text-right">
                                 <a href="/clients/<?= $client['id'] ?>/sites/<?= $s['id'] ?>/edit" class="text-xs text-slate-400 hover:text-slate-700 mr-2">Edit</a>
                                 <form method="POST" action="/clients/<?= $client['id'] ?>/sites/<?= $s['id'] ?>/delete" class="inline">
@@ -314,6 +330,24 @@ if (isset($db)) {
         </div>
         <?php else: ?>
             <p class="text-sm text-slate-400">No expenses linked to this client.</p>
+        <?php endif ?>
+    </section>
+
+
+    <!-- Attachments -->
+    <section>
+        <div class="flex items-center justify-between mb-2"><h2 class="text-sm font-semibold text-slate-700">PDF Attachments</h2></div>
+        <form method="POST" enctype="multipart/form-data" action="/clients/<?= $client['id'] ?>/attachments" class="bg-white border border-slate-200 rounded-lg p-4 flex gap-2 items-center">
+            <select name="type" class="border rounded px-2 py-1 text-sm"><option value="proposal">Proposal</option><option value="contract">Contract</option></select>
+            <input type="file" name="attachment" accept="application/pdf" class="text-sm" required>
+            <button class="px-3 py-1.5 bg-accent-600 text-white text-sm rounded">Upload PDF</button>
+        </form>
+        <?php if (!empty($client['attachments'])): ?>
+            <ul class="mt-2 text-sm bg-white border border-slate-200 rounded-lg divide-y">
+                <?php foreach ($client['attachments'] as $a): ?>
+                    <li class="p-3 flex justify-between"><span><?= ucfirst(e($a['type'])) ?> · <?= e($a['original_name']) ?></span><span><a class="text-accent-600" href="/clients/<?= $client['id'] ?>/attachments/<?= $a['id'] ?>/download">View</a> <form method="POST" action="/clients/<?= $client['id'] ?>/attachments/<?= $a['id'] ?>/delete" class="inline"><button class="text-red-500 ml-2">Delete</button></form></span></li>
+                <?php endforeach ?>
+            </ul>
         <?php endif ?>
     </section>
 

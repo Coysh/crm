@@ -68,6 +68,19 @@
             <label for="has_deployment_pipeline" class="text-sm text-slate-700">Has Deployment Pipeline</label>
         </div>
 
+
+        <?php if (!empty($ploiConnected)): ?>
+        <div>
+            <label for="ploi_site_id" class="block text-sm font-medium text-slate-700 mb-1">Ploi Site</label>
+            <select id="ploi_site_id" name="ploi_site_id" class="w-full border border-slate-300 rounded px-3 py-2 text-sm">
+                <option value="">— None —</option>
+                <?php foreach (($ploiSites ?? []) as $ps): ?>
+                    <option value="<?= $ps['id'] ?>" <?= (($currentPloiId ?? null) == $ps['id']) ? 'selected' : '' ?>><?= e($ps['domain']) ?><?= $ps['is_stale'] ? ' (stale)' : '' ?></option>
+                <?php endforeach ?>
+            </select>
+        </div>
+        <?php endif ?>
+
         <div>
             <label for="notes" class="block text-sm font-medium text-slate-700 mb-1">Notes</label>
             <textarea id="notes" name="notes" rows="3"

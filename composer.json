@@ -4,7 +4,8 @@
     "type": "project",
     "require": {
         "php": ">=8.2",
-        "bramus/router": "^1.6"
+        "bramus/router": "^1.6",
+        "ploi/ploi-php-sdk": "^2.0"
     },
     "autoload": {
         "psr-4": {
