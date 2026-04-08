@@ -41,6 +41,17 @@ $router->post('/clients/(\d+)/merge', function ($id) use ($db) {
     (new CoyshCRM\Controllers\ClientController($db))->doMerge((int)$id);
 });
 
+
+$router->post('/clients/(\d+)/attachments', function ($id) use ($db) {
+    (new CoyshCRM\Controllers\ClientController($db))->uploadAttachment((int)$id);
+});
+$router->get('/clients/(\d+)/attachments/(\d+)/download', function ($clientId, $attachmentId) use ($db) {
+    (new CoyshCRM\Controllers\ClientController($db))->downloadAttachment((int)$clientId, (int)$attachmentId);
+});
+$router->post('/clients/(\d+)/attachments/(\d+)/delete', function ($clientId, $attachmentId) use ($db) {
+    (new CoyshCRM\Controllers\ClientController($db))->deleteAttachment((int)$clientId, (int)$attachmentId);
+});
+
 // ── Domains (sub-resource of client) ──────────────────────────────────────
 $router->get('/clients/(\d+)/domains/create', function ($clientId) use ($db) {
     (new CoyshCRM\Controllers\DomainController($db))->create((int)$clientId);
@@ -155,6 +166,24 @@ $router->post('/expenses/(\d+)/delete', function ($id) use ($db) {
 // ── Settings ───────────────────────────────────────────────────────────────
 $router->get('/settings', function () use ($db) {
     (new CoyshCRM\Controllers\SettingsController($db))->index();
+});
+
+
+// ── Ploi Settings ─────────────────────────────────────────────────────────-
+$router->get('/settings/ploi', function () use ($db) {
+    (new CoyshCRM\Controllers\SettingsController($db))->ploi();
+});
+$router->post('/settings/ploi', function () use ($db) {
+    (new CoyshCRM\Controllers\SettingsController($db))->savePloi();
+});
+$router->post('/settings/ploi/test', function () use ($db) {
+    (new CoyshCRM\Controllers\SettingsController($db))->testPloi();
+});
+$router->post('/settings/ploi/disconnect', function () use ($db) {
+    (new CoyshCRM\Controllers\SettingsController($db))->disconnectPloi();
+});
+$router->post('/settings/ploi/sync', function () use ($db) {
+    (new CoyshCRM\Controllers\SettingsController($db))->syncPloi();
 });
 
 // ── FreeAgent Settings ─────────────────────────────────────────────────────

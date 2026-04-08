@@ -1,52 +1,56 @@
 <?php $isEdit = !empty($server['id']); ?>
 
-<div class="max-w-xl space-y-6">
+<div class="max-w-3xl space-y-6">
 
-    <h1 class="text-xl font-semibold text-slate-800">
-        <?= $isEdit ? 'Edit ' . e($server['name']) : 'Add Server' ?>
-    </h1>
+    <h1 class="text-xl font-semibold text-slate-800"><?= $isEdit ? 'Edit ' . e($server['name']) : 'Add Server' ?></h1>
 
     <form method="POST" action="<?= $isEdit ? '/servers/' . $server['id'] : '/servers' ?>" class="space-y-4 bg-white border border-slate-200 rounded-lg p-6">
+        <div>
+            <label class="block text-sm font-medium text-slate-700 mb-1">Server Name *</label>
+            <input type="text" name="name" value="<?= e($server['name'] ?? '') ?>" class="w-full border rounded px-3 py-2 text-sm">
+        </div>
+        <div>
+            <label class="block text-sm font-medium text-slate-700 mb-1">Provider</label>
+            <input type="text" name="provider" value="<?= e($server['provider'] ?? '') ?>" class="w-full border rounded px-3 py-2 text-sm">
+        </div>
+        <div>
+            <label class="block text-sm font-medium text-slate-700 mb-1">Monthly Cost (£)</label>
+            <input type="number" name="monthly_cost" step="0.01" min="0" value="<?= number_format((float)($server['monthly_cost'] ?? 0), 2) ?>" class="w-full border rounded px-3 py-2 text-sm">
+        </div>
+
+        <?php if ($ploiConnected): ?>
+        <div>
+            <label class="block text-sm font-medium text-slate-700 mb-1">Ploi Server</label>
+            <select name="ploi_server_id" class="w-full border rounded px-3 py-2 text-sm">
+                <option value="">None</option>
+                <?php $current = $ploiData['id'] ?? null; foreach ($ploiOptions as $ps): ?>
+                    <option value="<?= $ps['id'] ?>" <?= (string)$current === (string)$ps['id'] ? 'selected' : '' ?>><?= e($ps['name']) ?><?= $ps['is_stale'] ? ' (stale)' : '' ?></option>
+                <?php endforeach ?>
+            </select>
+        </div>
+        <?php endif ?>
 
         <div>
-            <label for="name" class="block text-sm font-medium text-slate-700 mb-1">Server Name <span class="text-red-500">*</span></label>
-            <input type="text" id="name" name="name" value="<?= e($server['name'] ?? '') ?>"
-                   placeholder="e.g. Hetzner CX21"
-                   class="w-full border <?= isset($errors['name']) ? 'border-red-400' : 'border-slate-300' ?> rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent-500">
-            <?php if (isset($errors['name'])): ?>
-                <p class="text-xs text-red-600 mt-1"><?= e($errors['name']) ?></p>
-            <?php endif ?>
+            <label class="block text-sm font-medium text-slate-700 mb-1">Notes</label>
+            <textarea name="notes" rows="3" class="w-full border rounded px-3 py-2 text-sm"><?= e($server['notes'] ?? '') ?></textarea>
         </div>
 
-        <div>
-            <label for="provider" class="block text-sm font-medium text-slate-700 mb-1">Provider</label>
-            <input type="text" id="provider" name="provider" value="<?= e($server['provider'] ?? '') ?>"
-                   placeholder="e.g. Hetzner, Homelab, SiteGround"
-                   class="w-full border border-slate-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent-500">
-        </div>
-
-        <div>
-            <label for="monthly_cost" class="block text-sm font-medium text-slate-700 mb-1">Monthly Cost (£)</label>
-            <input type="number" id="monthly_cost" name="monthly_cost" step="0.01" min="0"
-                   value="<?= number_format((float)($server['monthly_cost'] ?? 0), 2) ?>"
-                   class="w-full border <?= isset($errors['monthly_cost']) ? 'border-red-400' : 'border-slate-300' ?> rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent-500">
-            <?php if (isset($errors['monthly_cost'])): ?>
-                <p class="text-xs text-red-600 mt-1"><?= e($errors['monthly_cost']) ?></p>
-            <?php endif ?>
-        </div>
-
-        <div>
-            <label for="notes" class="block text-sm font-medium text-slate-700 mb-1">Notes</label>
-            <textarea id="notes" name="notes" rows="3"
-                      class="w-full border border-slate-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent-500"><?= e($server['notes'] ?? '') ?></textarea>
-        </div>
-
-        <div class="flex items-center gap-3 pt-2">
-            <button type="submit" class="px-4 py-2 bg-accent-600 text-white text-sm font-medium rounded hover:bg-accent-700">
-                <?= $isEdit ? 'Save Changes' : 'Create Server' ?>
-            </button>
-            <a href="/servers" class="text-sm text-slate-500 hover:text-slate-800">Cancel</a>
-        </div>
-
+        <button class="px-4 py-2 bg-accent-600 text-white text-sm rounded"><?= $isEdit ? 'Save Changes' : 'Create Server' ?></button>
     </form>
+
+    <?php if ($isEdit): ?>
+        <div class="bg-white border border-slate-200 rounded-lg p-5">
+            <h2 class="text-sm font-semibold text-slate-700 mb-3">Ploi Server Data</h2>
+            <?php if ($ploiData): ?>
+                <p class="text-sm">IP: <?= e($ploiData['ip_address'] ?: '—') ?> · Provider: <?= e($ploiData['provider'] ?: '—') ?> · Region: <?= e($ploiData['region'] ?: '—') ?></p>
+                <p class="text-sm">Status: <?= e($ploiData['status'] ?: '—') ?><?= $ploiData['is_stale'] ? ' (stale in Ploi)' : '' ?></p>
+                <p class="text-sm">PHP: <?php $vers = json_decode($ploiData['php_versions'] ?? '[]', true) ?: []; foreach($vers as $v){ echo e($v) . (($ploiData['php_cli_version']??'')===$v?' [CLI]':'') . ' '; } ?></p>
+                <p class="text-sm">Sites on this server: <?= (int)$ploiData['site_count'] ?></p>
+                <ul class="text-xs text-slate-500 list-disc ml-4 mt-2"><?php foreach (($ploiData['sites'] ?? []) as $site): ?><li><?= e($site['domain']) ?> (<?= e($site['project_type'] ?: 'unknown') ?>)</li><?php endforeach ?></ul>
+                <p class="text-xs text-slate-400 mt-2">Last synced: <?= formatDate($ploiData['last_synced_at'] ?? null) ?></p>
+            <?php else: ?>
+                <p class="text-sm text-slate-400">Link a Ploi server in settings.</p>
+            <?php endif ?>
+        </div>
+    <?php endif ?>
 </div>

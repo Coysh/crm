@@ -40,10 +40,13 @@
         // Check FA connection status for sidebar indicator (single cheap query)
         global $db;
         $faConnected = false;
+        $ploiConnected = false;
         if (isset($db)) {
             try {
                 $faRow = $db->query("SELECT access_token FROM freeagent_config WHERE id = 1")->fetch();
                 $faConnected = !empty($faRow['access_token']);
+                $ploiRow = $db->query("SELECT api_token FROM ploi_config WHERE id = 1")->fetch();
+                $ploiConnected = !empty($ploiRow['api_token']);
             } catch (\Throwable) {}
         }
 
@@ -76,7 +79,7 @@
                             <?php endforeach ?>
                         </svg>
                         <?= $item['label'] ?>
-                        <?php if ($path === '/freeagent'): ?>
+                        <?php if ($path === '/freeagent' || $path === '/settings'): ?>
                             <span class="ml-auto w-1.5 h-1.5 rounded-full <?= $faConnected ? 'bg-green-400' : 'bg-slate-600' ?>"></span>
                         <?php endif ?>
                     </a>
@@ -84,11 +87,15 @@
             <?php endforeach ?>
         </ul>
 
-        <!-- FA connection status footer -->
+        <!-- Integration status footer -->
         <div class="px-4 py-3 border-t border-slate-700">
             <a href="/settings/freeagent" class="flex items-center gap-2 text-xs <?= $faConnected ? 'text-green-400' : 'text-slate-500 hover:text-slate-300' ?>">
                 <span class="w-1.5 h-1.5 rounded-full <?= $faConnected ? 'bg-green-400' : 'bg-slate-600' ?>"></span>
                 <?= $faConnected ? 'FreeAgent connected' : 'FreeAgent not connected' ?>
+            </a>
+            <a href="/settings/ploi" class="flex items-center gap-2 text-xs mt-1 <?= $ploiConnected ? 'text-green-400' : 'text-slate-500 hover:text-slate-300' ?>">
+                <span class="w-1.5 h-1.5 rounded-full <?= $ploiConnected ? 'bg-green-400' : 'bg-slate-600' ?>"></span>
+                <?= $ploiConnected ? 'Ploi connected' : 'Ploi not connected' ?>
             </a>
         </div>
     </nav>

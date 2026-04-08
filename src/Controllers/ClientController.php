@@ -189,6 +189,56 @@ class ClientController
         redirect("/clients/$targetId");
     }
 
+
+    public function uploadAttachment(int $id): void
+    {
+        $client = $this->model->findById($id);
+        if (!$client) { redirect('/clients'); return; }
+
+        $type = in_array($_POST['type'] ?? '', ['proposal', 'contract']) ? $_POST['type'] : 'proposal';
+        $file = $_FILES['attachment'] ?? null;
+        if (!$file || $file['error'] !== UPLOAD_ERR_OK) { flash('error', 'Upload failed.'); redirect("/clients/$id"); }
+        if (($file['type'] ?? '') !== 'application/pdf') { flash('error', 'Only PDF files are allowed.'); redirect("/clients/$id"); }
+
+        $dir = DATA_PATH . '/attachments';
+        if (!is_dir($dir)) mkdir($dir, 0775, true);
+        $safe = time() . '-' . preg_replace('/[^a-zA-Z0-9._-]/', '-', basename($file['name']));
+        $target = $dir . '/' . $safe;
+        move_uploaded_file($file['tmp_name'], $target);
+
+        $this->db->prepare("INSERT INTO client_attachments (client_id, type, original_name, file_path) VALUES (?, ?, ?, ?)")
+            ->execute([$id, $type, $file['name'], $target]);
+
+        flash('success', 'Attachment uploaded.');
+        redirect("/clients/$id");
+    }
+
+    public function downloadAttachment(int $clientId, int $attachmentId): void
+    {
+        $stmt = $this->db->prepare("SELECT * FROM client_attachments WHERE id = ? AND client_id = ? LIMIT 1");
+        $stmt->execute([$attachmentId, $clientId]);
+        $a = $stmt->fetch();
+        if (!$a || !is_file($a['file_path'])) { http_response_code(404); echo 'Not found'; return; }
+
+        header('Content-Type: application/pdf');
+        header('Content-Disposition: inline; filename="' . basename($a['original_name']) . '"');
+        readfile($a['file_path']);
+        exit;
+    }
+
+    public function deleteAttachment(int $clientId, int $attachmentId): void
+    {
+        $stmt = $this->db->prepare("SELECT * FROM client_attachments WHERE id = ? AND client_id = ? LIMIT 1");
+        $stmt->execute([$attachmentId, $clientId]);
+        $a = $stmt->fetch();
+        if ($a) {
+            if (is_file($a['file_path'])) @unlink($a['file_path']);
+            $this->db->prepare("DELETE FROM client_attachments WHERE id = ?")->execute([$attachmentId]);
+        }
+        flash('success', 'Attachment deleted.');
+        redirect("/clients/$clientId");
+    }
+
     private function sanitise(array $post): array
     {
         return [
