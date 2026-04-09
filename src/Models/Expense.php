@@ -8,16 +8,20 @@ class Expense extends Model
 {
     protected string $table = 'expenses';
 
-    public function findAllWithRelations(?string $category = null, ?int $clientId = null, ?int $serverId = null): array
-    {
+    public function findAllWithRelations(
+        ?string $category = null,
+        ?int    $clientId = null,
+        ?int    $serverId = null,
+        ?string $source   = null
+    ): array {
         $sql = "
             SELECT e.*,
                    c.name AS client_name,
                    s.name AS server_name,
                    p.name AS project_name
             FROM expenses e
-            LEFT JOIN clients c ON c.id = e.client_id
-            LEFT JOIN servers s ON s.id = e.server_id
+            LEFT JOIN clients c  ON c.id = e.client_id
+            LEFT JOIN servers s  ON s.id = e.server_id
             LEFT JOIN projects p ON p.id = e.project_id
             WHERE 1=1
         ";
@@ -34,6 +38,11 @@ class Expense extends Model
         if ($serverId) {
             $sql .= ' AND e.server_id = ?';
             $params[] = $serverId;
+        }
+        if ($source === 'manual') {
+            $sql .= " AND (e.source = 'manual' OR e.source IS NULL)";
+        } elseif ($source === 'freeagent') {
+            $sql .= " AND e.source = 'freeagent'";
         }
 
         $sql .= ' ORDER BY e.date DESC, e.created_at DESC';

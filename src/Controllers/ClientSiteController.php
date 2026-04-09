@@ -91,11 +91,43 @@ class ClientSiteController
 
         $this->model->update($id, $data);
         $this->savePloiSiteLink($id, (int)($_POST['ploi_site_id'] ?? 0));
+
+        // Keep linked domain's client_id in sync with the site's client
+        if ($data['client_id'] ?? null) {
+            $stmt = $this->db->prepare("SELECT domain_id FROM client_sites WHERE id = ? LIMIT 1");
+            $stmt->execute([$id]);
+            $domainId = $stmt->fetchColumn();
+            if ($domainId) {
+                $this->db->prepare("UPDATE domains SET client_id = ? WHERE id = ?")->execute([$data['client_id'], $domainId]);
+            }
+        }
+
         flash('success', 'Site updated.'); redirect("/clients/$clientId");
     }
 
     public function destroy(int $clientId, int $id): void
     {
+        // Before unlinking, add any linked Ploi site to exclusions
+        try {
+            $stmtPloi = $this->db->prepare("
+                SELECT ps.ploi_id, ps.ploi_server_id, d.domain AS domain_name
+                FROM ploi_sites ps
+                LEFT JOIN client_sites cs ON cs.id = ps.client_site_id
+                LEFT JOIN domains d ON d.id = cs.domain_id
+                WHERE ps.client_site_id = ?
+            ");
+            $stmtPloi->execute([$id]);
+            $ploiRows = $stmtPloi->fetchAll();
+            foreach ($ploiRows as $ps) {
+                try {
+                    $this->db->prepare("
+                        INSERT OR IGNORE INTO ploi_sync_exclusions (ploi_site_id, ploi_server_id, domain, reason)
+                        VALUES (?, ?, ?, 'Deleted from CRM')
+                    ")->execute([$ps['ploi_id'], $ps['ploi_server_id'], $ps['domain_name']]);
+                } catch (\Throwable) {}
+            }
+        } catch (\Throwable) {}
+
         $this->db->prepare("UPDATE ploi_sites SET client_site_id = NULL WHERE client_site_id = ?")->execute([$id]);
         $this->model->delete($id); flash('success', 'Site removed.'); redirect("/clients/$clientId");
     }

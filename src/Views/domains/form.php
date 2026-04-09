@@ -42,10 +42,17 @@
                        class="w-full border border-slate-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent-500">
             </div>
             <div>
-                <label for="annual_cost" class="block text-sm font-medium text-slate-700 mb-1">Annual Cost (£)</label>
-                <input type="number" id="annual_cost" name="annual_cost" step="0.01" min="0"
-                       value="<?= $domain['annual_cost'] !== null && $domain['annual_cost'] !== '' ? number_format((float)$domain['annual_cost'], 2) : '' ?>"
-                       class="w-full border border-slate-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent-500">
+                <label for="annual_cost" class="block text-sm font-medium text-slate-700 mb-1">Annual Cost</label>
+                <div class="flex gap-2">
+                    <select name="currency" class="border border-slate-300 rounded px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent-500 bg-white">
+                        <?php foreach (['GBP' => '£ GBP', 'USD' => '$ USD', 'EUR' => '€ EUR'] as $code => $label): ?>
+                            <option value="<?= $code ?>" <?= ($domain['currency'] ?? 'GBP') === $code ? 'selected' : '' ?>><?= $label ?></option>
+                        <?php endforeach ?>
+                    </select>
+                    <input type="number" id="annual_cost" name="annual_cost" step="0.01" min="0"
+                           value="<?= $domain['annual_cost'] !== null && $domain['annual_cost'] !== '' ? number_format((float)$domain['annual_cost'], 2) : '' ?>"
+                           class="flex-1 border border-slate-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent-500">
+                </div>
             </div>
         </div>
 

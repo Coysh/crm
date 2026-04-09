@@ -98,7 +98,67 @@ function e(mixed $value): string
  */
 function money(mixed $value): string
 {
-    return '£' . number_format((float)($value ?? 0), 2);
+    return '£' . number_format((float)($value ?? 0), 2, '.', ',');
+}
+
+/**
+ * Format a money value in the given currency.
+ * formatCurrency(1200, 'USD') → "$1,200.00"
+ */
+function formatCurrency(mixed $amount, string $currency = 'GBP'): string
+{
+    $symbols = ['GBP' => '£', 'USD' => '$', 'EUR' => '€'];
+    $sym     = $symbols[$currency] ?? $currency . ' ';
+    return $sym . number_format((float)($amount ?? 0), 2, '.', ',');
+}
+
+/**
+ * Format a non-GBP amount with its GBP equivalent.
+ * For GBP amounts just returns the formatted value.
+ * formatWithGBPEquivalent(29, 'USD') → "$29.00 (≈ £22.83)"
+ */
+function formatWithGBPEquivalent(mixed $amount, string $currency, ?\CoyshCRM\Services\ExchangeRateService $fx = null): string
+{
+    if ($currency === 'GBP' || $currency === null) {
+        return money($amount);
+    }
+    $native = formatCurrency($amount, $currency);
+    if ($fx === null) return $native;
+    $gbp = $fx->convertToGBP((float)$amount, $currency);
+    return $native . ' <span class="text-slate-400">(≈ ' . money($gbp) . ')</span>';
+}
+
+/**
+ * Convert a FreeAgent API URL to its web UI URL.
+ * e.g. https://api.freeagent.com/v2/invoices/123 → https://coyshdigital.freeagent.com/invoices/123
+ */
+function freeagentWebUrl(?string $apiUrl): ?string
+{
+    if (!$apiUrl) return null;
+    if (!preg_match('|/v2/([\w_]+)/(\d+)|', $apiUrl, $m)) return null;
+    $base = 'https://coyshdigital.freeagent.com';
+    return match($m[1]) {
+        'contacts'                      => "$base/contacts/{$m[2]}",
+        'invoices'                      => "$base/invoices/{$m[2]}",
+        'recurring_invoices'            => "$base/invoices/recurring/{$m[2]}",
+        'bank_transaction_explanations' => "$base/bank_transactions/{$m[2]}",
+        'bills'                         => "$base/bills/{$m[2]}",
+        default                         => null,
+    };
+}
+
+/**
+ * Render a FreeAgent web link (opens in new tab), or plain text if no URL can be derived.
+ */
+function freeagentLink(?string $apiUrl, string $text, string $extraClass = ''): string
+{
+    $webUrl = freeagentWebUrl($apiUrl);
+    if (!$webUrl) return e($text) ?: '—';
+    $cls = 'hover:text-accent-600' . ($extraClass ? ' ' . $extraClass : '');
+    return sprintf(
+        '<a href="%s" target="_blank" rel="noopener noreferrer" class="%s">%s <span class="text-xs opacity-40">↗</span></a>',
+        e($webUrl), e($cls), e($text ?: '—')
+    );
 }
 
 /**

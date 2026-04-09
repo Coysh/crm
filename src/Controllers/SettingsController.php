@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace CoyshCRM\Controllers;
 
+use CoyshCRM\Services\ExchangeRateService;
 use CoyshCRM\Services\FreeAgentClient;
 use CoyshCRM\Services\PloiService;
 use CoyshCRM\Services\PloiSync;
@@ -44,7 +45,23 @@ class SettingsController
             'last_error'       => $this->db->query("SELECT * FROM ploi_sync_log WHERE status = 'failed' ORDER BY started_at DESC LIMIT 1")->fetch() ?: null,
         ];
 
-        render('settings.index', compact('faCfg', 'connected', 'ploiCfg', 'ploiConnected', 'ploiStats'), 'Settings');
+        $fxSvc         = new ExchangeRateService($this->db);
+        $exchangeRates = $fxSvc->getCurrentRates();
+
+        render('settings.index', compact('faCfg', 'connected', 'ploiCfg', 'ploiConnected', 'ploiStats', 'exchangeRates'), 'Settings');
+    }
+
+    public function refreshExchangeRates(): void
+    {
+        $svc   = new ExchangeRateService($this->db);
+        $rates = $svc->fetchFromApi();
+        if (!empty($rates)) {
+            $parts = array_map(fn($c, $r) => "1 GBP = " . number_format($r, 4) . " $c", array_keys($rates), $rates);
+            flash('success', 'Exchange rates updated: ' . implode(', ', $parts));
+        } else {
+            flash('error', 'Failed to fetch exchange rates from Frankfurter API. Using last cached rates.');
+        }
+        redirect('/settings');
     }
 
     public function freeagent(): void
@@ -93,6 +110,18 @@ class SettingsController
     {
         $this->ploi->disconnect();
         flash('success', 'Ploi disconnected.');
+        redirect('/settings/ploi');
+    }
+
+    public function syncPloiDomains(): void
+    {
+        try {
+            $sync  = new PloiSync($this->db, $this->ploi);
+            $count = $sync->syncDomains();
+            flash('success', "Domain re-sync complete — $count domain(s) created or linked.");
+        } catch (\Throwable $e) {
+            flash('error', 'Domain sync failed: ' . $e->getMessage());
+        }
         redirect('/settings/ploi');
     }
 
@@ -194,6 +223,8 @@ class SettingsController
 
     public function rematchContacts(): void { $sync = new \CoyshCRM\Services\FreeAgentSync($this->db, $this->fa); $matched = $sync->rematchContacts(); flash('success', "Re-match complete — $matched contact(s) matched."); redirect('/settings/freeagent/contacts'); }
 
+    public function createClientsForUnmatched(): void { $sync = new \CoyshCRM\Services\FreeAgentSync($this->db, $this->fa); $count = $sync->createClientsForUnmatched(); flash('success', "Created $count client(s) for unmatched FreeAgent contacts."); redirect('/settings/freeagent/contacts'); }
+
     public function categories(): void
     {
         $faIncomeCategories = $this->db->query("SELECT DISTINCT category AS fa_category FROM freeagent_invoices WHERE category IS NOT NULL ORDER BY category")->fetchAll(\PDO::FETCH_COLUMN);
@@ -223,11 +254,43 @@ class SettingsController
     {
         $existing = $this->db->prepare("SELECT id FROM freeagent_category_mappings WHERE freeagent_category = ? AND type = ?");
         $existing->execute([$faCategory, $type]);
-        if ($existing->fetch()) {
+        $row = $existing->fetch();
+
+        if ($local === null) {
+            // No mapping selected — remove any existing row
+            if ($row) {
+                $this->db->prepare("DELETE FROM freeagent_category_mappings WHERE freeagent_category = ? AND type = ?")->execute([$faCategory, $type]);
+            }
+            return;
+        }
+
+        if ($row) {
             $this->db->prepare("UPDATE freeagent_category_mappings SET local_category = ? WHERE freeagent_category = ? AND type = ?")->execute([$local, $faCategory, $type]);
         } else {
             $this->db->prepare("INSERT INTO freeagent_category_mappings (freeagent_category, local_category, type) VALUES (?, ?, ?)")->execute([$faCategory, $local, $type]);
         }
+    }
+
+    public function deletionLog(): void
+    {
+        try {
+            $rows = $this->db->query("SELECT * FROM deletion_log ORDER BY deleted_at DESC LIMIT 500")->fetchAll();
+        } catch (\Throwable) {
+            $rows = [];
+        }
+        $breadcrumbs = [['Settings', '/settings'], ['Deletion Log', null]];
+        render('settings.deletion_log', compact('rows', 'breadcrumbs'), 'Deletion Log');
+    }
+
+    public function removePloiExclusion(int $id): void
+    {
+        try {
+            $this->db->prepare("DELETE FROM ploi_sync_exclusions WHERE id = ?")->execute([$id]);
+            flash('success', 'Exclusion removed. Site will be included in future syncs.');
+        } catch (\Throwable $e) {
+            flash('error', 'Failed to remove exclusion: ' . $e->getMessage());
+        }
+        redirect('/settings/ploi');
     }
 
     private function buildRedirectUri(): string

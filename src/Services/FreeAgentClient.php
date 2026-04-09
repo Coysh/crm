@@ -18,6 +18,11 @@ class FreeAgentClient
 
     private ?array $config = null;
 
+    /** Pages fetched in the last getAll() call — readable by sync methods for logging. */
+    public int $lastPageCount = 0;
+    /** X-Total-Count from the last page of the last getAll() call (null if header absent). */
+    public ?int $lastTotalCount = null;
+
     public function __construct(private PDO $db) {}
 
     // ── Config helpers ────────────────────────────────────────────────────
@@ -158,28 +163,50 @@ class FreeAgentClient
 
     /**
      * Paginate through all pages, collecting items under $key.
-     * Pagination follows the Link response header (rel="next"), per FreeAgent docs.
+     *
+     * Primary strategy: follow the Link response header rel="next" (per FreeAgent docs).
+     * Fallback strategy: if a full page (per_page items) is returned but no Link header
+     * was found, increment the page param explicitly. This guards against endpoints that
+     * omit the Link header. Stops when a page returns fewer than per_page items.
      */
     public function getAll(string $path, string $key, array $params = []): array
     {
         $this->ensureFreshToken();
-        $cfg = $this->getConfig();
+        $cfg     = $this->getConfig();
+        $perPage = 100;
 
-        $url              = $this->getBaseUrl() . ltrim($path, '/');
-        $params['per_page'] = 100;
-        $firstRequest     = true;
-        $items            = [];
+        $baseUrl            = $this->getBaseUrl() . ltrim($path, '/');
+        $params['per_page'] = $perPage;
+        $firstRequest       = true;
+        $items              = [];
+        $page               = 0;
+        $url                = $baseUrl;
 
         while ($url) {
-            $result = $this->curlGet(
+            $page++;
+            $result       = $this->curlGet(
                 $firstRequest ? $url . '?' . http_build_query($params) : $url,
                 $cfg['access_token']
             );
             $firstRequest = false;
-            $items        = array_merge($items, $result['body'][$key] ?? []);
-            $url          = $result['next'];  // null when no more pages
+            $pageItems    = $result['body'][$key] ?? [];
+            $items        = array_merge($items, $pageItems);
+
+            if ($result['next']) {
+                // Explicit next-page URL from Link header
+                $url = $result['next'];
+            } elseif (count($pageItems) === $perPage) {
+                // Full page returned but no Link header — try next page explicitly
+                $fallbackParams         = $params;
+                $fallbackParams['page'] = $page + 1;
+                $url = $baseUrl . '?' . http_build_query($fallbackParams);
+            } else {
+                $url = null;  // Partial page — this is the last page
+            }
         }
 
+        $this->lastPageCount  = $page;
+        $this->lastTotalCount = $result['total'] ?? null;  // X-Total-Count from last page
         return $items;
     }
 
@@ -241,11 +268,14 @@ class FreeAgentClient
 
         // Docs: pagination is via Link response header, e.g.:
         // Link: <https://...?page=2>; rel="next", <...>; rel="last"
-        $nextUrl = isset($responseHeaders['link'])
+        $nextUrl    = isset($responseHeaders['link'])
             ? $this->parseLinkNext($responseHeaders['link'])
             : null;
+        $totalCount = isset($responseHeaders['x-total-count'])
+            ? (int)$responseHeaders['x-total-count']
+            : null;
 
-        return ['body' => $decoded, 'next' => $nextUrl];
+        return ['body' => $decoded, 'next' => $nextUrl, 'total' => $totalCount];
     }
 
     /**

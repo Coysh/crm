@@ -13,11 +13,6 @@
             <label class="block text-sm font-medium text-slate-700 mb-1">Provider</label>
             <input type="text" name="provider" value="<?= e($server['provider'] ?? '') ?>" class="w-full border rounded px-3 py-2 text-sm">
         </div>
-        <div>
-            <label class="block text-sm font-medium text-slate-700 mb-1">Monthly Cost (£)</label>
-            <input type="number" name="monthly_cost" step="0.01" min="0" value="<?= number_format((float)($server['monthly_cost'] ?? 0), 2) ?>" class="w-full border rounded px-3 py-2 text-sm">
-        </div>
-
         <?php if ($ploiConnected): ?>
         <div>
             <label class="block text-sm font-medium text-slate-700 mb-1">Ploi Server</label>
@@ -39,6 +34,35 @@
     </form>
 
     <?php if ($isEdit): ?>
+        <!-- Hosting Cost (via Recurring Costs) -->
+        <div class="bg-white border border-slate-200 rounded-lg p-5">
+            <div class="flex items-center justify-between mb-2">
+                <h2 class="text-sm font-semibold text-slate-700">Hosting Cost</h2>
+                <?php if (!empty($linkedCost)): ?>
+                    <a href="/expenses/recurring/<?= $linkedCost['id'] ?>/edit" class="text-xs text-accent-600 hover:underline">Edit recurring cost</a>
+                <?php else: ?>
+                    <a href="/expenses/recurring/create?for_server=<?= $server['id'] ?>" class="text-xs text-accent-600 hover:underline">+ Add recurring cost</a>
+                <?php endif ?>
+            </div>
+            <?php if (!empty($linkedCost)): ?>
+                <?php $monthlyCost = ($linkedCost['billing_cycle'] ?? 'monthly') === 'annual' ? $linkedCost['amount'] / 12.0 : $linkedCost['amount']; ?>
+                <p class="text-sm text-slate-700">
+                    <span class="font-medium"><?= money($monthlyCost) ?>/mo</span>
+                    <span class="text-slate-400 mx-1">·</span>
+                    <span class="font-medium"><?= money($monthlyCost * 12) ?>/yr</span>
+                    <?php if (($linkedCost['billing_cycle'] ?? '') === 'annual'): ?>
+                        <span class="text-xs text-slate-400 ml-1">(<?= money($linkedCost['amount']) ?>/yr ÷ 12)</span>
+                    <?php endif ?>
+                    <span class="text-slate-400 ml-2">— <?= e($linkedCost['name']) ?></span>
+                </p>
+                <p class="text-xs text-slate-400 mt-0.5">Category: <?= e($linkedCost['category_name']) ?></p>
+            <?php else: ?>
+                <p class="text-sm text-slate-400">No hosting cost set.
+                    <a href="/expenses/recurring/create?for_server=<?= $server['id'] ?>" class="text-accent-600 hover:underline">Add recurring cost</a>
+                </p>
+            <?php endif ?>
+        </div>
+
         <div class="bg-white border border-slate-200 rounded-lg p-5">
             <h2 class="text-sm font-semibold text-slate-700 mb-3">Ploi Server Data</h2>
             <?php if ($ploiData): ?>

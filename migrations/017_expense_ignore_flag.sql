@@ -1,0 +1,1 @@
+ALTER TABLE expenses ADD COLUMN ignore_from_stats INTEGER NOT NULL DEFAULT 0;

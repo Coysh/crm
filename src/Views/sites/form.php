@@ -24,7 +24,7 @@
             <div>
                 <label for="server_id" class="block text-sm font-medium text-slate-700 mb-1">Server</label>
                 <select id="server_id" name="server_id" class="w-full border border-slate-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent-500">
-                    <option value="">— None —</option>
+                    <option value="">External / Not managed</option>
                     <?php foreach ($servers as $s): ?>
                         <option value="<?= $s['id'] ?>" <?= ($site['server_id'] ?? null) == $s['id'] ? 'selected' : '' ?>><?= e($s['name']) ?></option>
                     <?php endforeach ?>

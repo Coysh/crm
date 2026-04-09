@@ -43,21 +43,47 @@
                         <th class="px-4 py-2.5 text-left">Project</th>
                         <th class="px-4 py-2.5 text-left">Client</th>
                         <th class="px-4 py-2.5 text-left">Category</th>
-                        <th class="px-4 py-2.5 text-right">Income</th>
+                        <th class="px-4 py-2.5 text-right">Target</th>
+                        <th class="px-4 py-2.5 text-right">Invoiced</th>
+                        <th class="px-4 py-2.5 text-right">Remaining</th>
+                        <th class="px-4 py-2.5 text-center" style="min-width:100px">Progress</th>
                         <th class="px-4 py-2.5 text-left">Dates</th>
                         <th class="px-4 py-2.5 text-center">Status</th>
                         <th class="px-4 py-2.5"></th>
                     </tr>
                 </thead>
                 <tbody class="divide-y divide-slate-100">
-                    <?php foreach ($projects as $p): ?>
+                    <?php foreach ($projects as $p):
+                        $pTarget   = (float)($p['income_target'] ?? 0);
+                        $pInvoiced = (float)($p['income_invoiced'] ?? 0);
+                        $pRemaining = $pTarget - $pInvoiced;
+                        $pPct       = $pTarget > 0 ? min(round(($pInvoiced / $pTarget) * 100), 999) : 0;
+                        $pBarPct    = min($pPct, 100);
+                        $pBarColor  = $pPct > 100 ? 'bg-amber-500' : 'bg-green-500';
+                    ?>
                         <tr class="hover:bg-slate-50">
                             <td class="px-4 py-2.5 font-medium"><?= e($p['name']) ?></td>
                             <td class="px-4 py-2.5 text-slate-500">
                                 <a href="/clients/<?= $p['client_id'] ?>" class="hover:text-accent-600"><?= e($p['client_name']) ?></a>
                             </td>
                             <td class="px-4 py-2.5 text-slate-500"><?= e($categories[$p['income_category']] ?? $p['income_category']) ?></td>
-                            <td class="px-4 py-2.5 text-right tabular-nums"><?= money($p['income']) ?></td>
+                            <td class="px-4 py-2.5 text-right tabular-nums"><?= $pTarget > 0 ? money($pTarget) : '<span class="text-slate-300">—</span>' ?></td>
+                            <td class="px-4 py-2.5 text-right tabular-nums"><?= $pInvoiced > 0 ? money($pInvoiced) : '<span class="text-slate-300">—</span>' ?></td>
+                            <td class="px-4 py-2.5 text-right tabular-nums <?= $pRemaining < 0 ? 'text-red-600' : '' ?>">
+                                <?= $pTarget > 0 ? money($pRemaining) : '<span class="text-slate-300">—</span>' ?>
+                            </td>
+                            <td class="px-4 py-2.5">
+                                <?php if ($pTarget > 0): ?>
+                                <div class="flex items-center gap-2">
+                                    <div class="flex-1 bg-slate-200 rounded-full h-1.5">
+                                        <div class="<?= $pBarColor ?> h-1.5 rounded-full" style="width: <?= $pBarPct ?>%"></div>
+                                    </div>
+                                    <span class="text-xs tabular-nums <?= $pPct > 100 ? 'text-amber-600 font-medium' : 'text-slate-500' ?>"><?= $pPct ?>%</span>
+                                </div>
+                                <?php else: ?>
+                                <span class="text-slate-300 text-xs">—</span>
+                                <?php endif ?>
+                            </td>
                             <td class="px-4 py-2.5 text-slate-500 text-xs">
                                 <?= formatDate($p['start_date']) ?>
                                 <?php if ($p['end_date']): ?> → <?= formatDate($p['end_date']) ?><?php endif ?>
@@ -74,7 +100,7 @@
                         </tr>
                     <?php endforeach ?>
                     <?php if (empty($projects)): ?>
-                        <tr><td colspan="7" class="px-4 py-8 text-center text-slate-400">No projects found.</td></tr>
+                        <tr><td colspan="10" class="px-4 py-8 text-center text-slate-400">No projects found.</td></tr>
                     <?php endif ?>
                 </tbody>
             </table>

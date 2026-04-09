@@ -14,10 +14,12 @@
                     <tr>
                         <th class="px-4 py-2.5 text-left">Server</th>
                         <th class="px-4 py-2.5 text-left">Provider</th>
+                        <th class="px-4 py-2.5 text-left">OS</th>
                         <th class="px-4 py-2.5 text-right">Monthly Cost</th>
                         <th class="px-4 py-2.5 text-center">Sites</th>
                         <th class="px-4 py-2.5 text-center">Clients</th>
-                        <th class="px-4 py-2.5 text-right">Cost / Client</th>
+                        <th class="px-4 py-2.5 text-right">Cost / Client (mo)</th>
+                        <th class="px-4 py-2.5 text-right">Cost / Client (yr)</th>
                         <th class="px-4 py-2.5"></th>
                     </tr>
                 </thead>
@@ -26,10 +28,17 @@
                         <tr class="hover:bg-slate-50">
                             <td class="px-4 py-2.5 font-medium"><?= e($s['name']) ?></td>
                             <td class="px-4 py-2.5 text-slate-500"><?= e($s['provider'] ?: '—') ?></td>
+                            <td class="px-4 py-2.5 text-slate-500 text-xs">
+                                <?php
+                                $os = trim(($s['os_name'] ?? '') . ($s['os_version'] ? ' ' . $s['os_version'] : ''));
+                                echo $os ? e($os) : '—';
+                                ?>
+                            </td>
                             <td class="px-4 py-2.5 text-right tabular-nums"><?= money($s['monthly_cost']) ?></td>
                             <td class="px-4 py-2.5 text-center tabular-nums"><?= (int)$s['site_count'] ?></td>
                             <td class="px-4 py-2.5 text-center tabular-nums"><?= (int)$s['client_count'] ?></td>
                             <td class="px-4 py-2.5 text-right tabular-nums text-slate-500"><?= money($s['cost_per_client']) ?></td>
+                            <td class="px-4 py-2.5 text-right tabular-nums text-slate-500"><?= money($s['cost_per_client'] * 12) ?></td>
                             <td class="px-4 py-2.5 text-right">
                                 <a href="/servers/<?= $s['id'] ?>/edit" class="text-xs text-slate-400 hover:text-slate-700 mr-2">Edit</a>
                                 <form method="POST" action="/servers/<?= $s['id'] ?>/delete" class="inline">
@@ -39,7 +48,7 @@
                         </tr>
                     <?php endforeach ?>
                     <?php if (empty($servers)): ?>
-                        <tr><td colspan="7" class="px-4 py-8 text-center text-slate-400">No servers yet.</td></tr>
+                        <tr><td colspan="9" class="px-4 py-8 text-center text-slate-400">No servers yet.</td></tr>
                     <?php endif ?>
                 </tbody>
             </table>

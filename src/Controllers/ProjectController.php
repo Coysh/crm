@@ -120,6 +120,8 @@ class ProjectController
             'name'            => trim($post['name'] ?? ''),
             'income_category' => in_array($post['income_category'] ?? '', $categories) ? $post['income_category'] : '',
             'income'          => (float)($post['income'] ?? 0),
+            'income_target'   => (float)($post['income_target'] ?? 0),
+            'income_invoiced' => (float)($post['income_invoiced'] ?? 0),
             'start_date'      => $post['start_date'] ?: null,
             'end_date'        => $post['end_date'] ?: null,
             'notes'           => trim($post['notes'] ?? ''),

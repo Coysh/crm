@@ -2,11 +2,19 @@
 
     <div class="flex items-center justify-between">
         <h1 class="text-xl font-semibold text-slate-800">Contact Mapping</h1>
-        <form method="POST" action="/settings/freeagent/contacts/rematch">
-            <button type="submit" class="px-3 py-1.5 border border-slate-300 rounded text-sm hover:bg-slate-50">
-                Re-run Auto-match
-            </button>
-        </form>
+        <div class="flex gap-2">
+            <form method="POST" action="/settings/freeagent/contacts/rematch">
+                <button type="submit" class="px-3 py-1.5 border border-slate-300 rounded text-sm hover:bg-slate-50">
+                    Re-run Auto-match
+                </button>
+            </form>
+            <form method="POST" action="/settings/freeagent/contacts/create-unmatched"
+                  onsubmit="return confirm('Create a new CRM client for every unmatched FreeAgent contact?')">
+                <button type="submit" class="px-3 py-1.5 border border-amber-300 bg-amber-50 text-amber-700 rounded text-sm hover:bg-amber-100">
+                    Create clients for unmatched
+                </button>
+            </form>
+        </div>
     </div>
 
     <!-- Stats -->
@@ -39,7 +47,7 @@
                 <?php foreach ($contacts as $contact): ?>
                     <?php $unmatched = !$contact['client_id']; ?>
                     <tr class="<?= $unmatched ? 'bg-amber-50' : 'hover:bg-slate-50' ?>">
-                        <td class="px-4 py-2.5 font-medium"><?= e($contact['name']) ?></td>
+                        <td class="px-4 py-2.5 font-medium"><?= freeagentLink($contact['freeagent_url'] ?? null, $contact['name'], 'font-medium') ?></td>
                         <td class="px-4 py-2.5 text-slate-500 text-xs"><?= e($contact['email'] ?: '—') ?></td>
                         <td class="px-4 py-2.5" id="client-label-<?= $contact['id'] ?>">
                             <?= $contact['client_name'] ? e($contact['client_name']) : '<span class="text-slate-300">Unmatched</span>' ?>

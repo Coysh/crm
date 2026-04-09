@@ -45,12 +45,43 @@
             <?php endif ?>
         </div>
 
+        <!-- Client Type -->
+        <div>
+            <label class="block text-sm font-medium text-slate-700 mb-2">Client Type</label>
+            <div class="flex flex-wrap gap-4">
+                <?php foreach (['managed' => 'Managed', 'support_only' => 'Support Only', 'consultancy_only' => 'Consultancy Only'] as $val => $label): ?>
+                    <label class="flex items-center gap-2 text-sm cursor-pointer">
+                        <input type="radio" name="client_type" value="<?= $val ?>"
+                               onchange="toggleAgreementNotes()"
+                               <?= ($client['client_type'] ?? 'managed') === $val ? 'checked' : '' ?>>
+                        <?= $label ?>
+                    </label>
+                <?php endforeach ?>
+            </div>
+            <p class="text-xs text-slate-400 mt-1">Managed = full site ownership + hosting; Support Only = ad-hoc support; Consultancy Only = advice/strategy, no infrastructure.</p>
+        </div>
+
+        <!-- Agreement Notes (shown for non-managed types) -->
+        <div id="agreement_notes_wrap" <?= ($client['client_type'] ?? 'managed') === 'managed' ? 'style="display:none"' : '' ?>>
+            <label for="agreement_notes" class="block text-sm font-medium text-slate-700 mb-1">Agreement Notes</label>
+            <textarea id="agreement_notes" name="agreement_notes" rows="3"
+                      class="w-full border border-slate-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent-500"><?= e($client['agreement_notes'] ?? '') ?></textarea>
+            <p class="text-xs text-slate-400 mt-1">Scope of engagement, included hours, SLA, or other arrangement details.</p>
+        </div>
+
         <!-- Notes -->
         <div>
             <label for="notes" class="block text-sm font-medium text-slate-700 mb-1">Notes</label>
             <textarea id="notes" name="notes" rows="3"
                       class="w-full border border-slate-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent-500"><?= e($client['notes'] ?? '') ?></textarea>
         </div>
+
+        <script>
+        function toggleAgreementNotes() {
+            const type = document.querySelector('input[name="client_type"]:checked')?.value ?? 'managed';
+            document.getElementById('agreement_notes_wrap').style.display = type === 'managed' ? 'none' : '';
+        }
+        </script>
 
         <!-- Actions -->
         <div class="flex items-center gap-3 pt-2">

@@ -96,6 +96,16 @@
                       class="w-full border border-slate-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent-500"><?= e($expense['notes'] ?? '') ?></textarea>
         </div>
 
+        <div class="flex items-center gap-2 py-2 px-3 bg-amber-50 border border-amber-200 rounded">
+            <input type="checkbox" id="ignore_from_stats" name="ignore_from_stats" value="1"
+                   class="h-4 w-4 rounded border-slate-300 text-amber-500 focus:ring-amber-400"
+                   <?= !empty($expense['ignore_from_stats']) ? 'checked' : '' ?>>
+            <label for="ignore_from_stats" class="text-sm text-amber-800">
+                Exclude from all stats and breakdowns
+                <span class="text-amber-600 font-normal">(transfers, personal expenses, etc.)</span>
+            </label>
+        </div>
+
         <div class="flex items-center gap-3 pt-2">
             <button type="submit" class="px-4 py-2 bg-accent-600 text-white text-sm font-medium rounded hover:bg-accent-700">
                 <?= $isEdit ? 'Save Changes' : 'Add Expense' ?>

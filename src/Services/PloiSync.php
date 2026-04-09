@@ -74,10 +74,19 @@ class PloiSync
                     $phpCli      = $d['php_cli_version'] ?? ($d['php_version'] ?? null);
                     $statusVal   = $d['status'] ?? null;
 
+                    // OS info — Ploi returns various field names depending on provider
+                    $osRaw     = $d['operating_system'] ?? ($d['os'] ?? ($d['type'] ?? null));
+                    $osVersion = $d['os_version'] ?? ($d['ubuntu_version'] ?? null);
+                    // If os is a compound string like "Ubuntu 22.04", split it
+                    if ($osRaw && !$osVersion && preg_match('/^(\D+?)\s+([\d.]+)$/i', trim($osRaw), $m)) {
+                        $osRaw     = trim($m[1]);
+                        $osVersion = trim($m[2]);
+                    }
+
                     $this->db->prepare(
                         "INSERT INTO ploi_servers
-                            (ploi_id, name, ip_address, provider, region, status, php_versions, php_cli_version, is_stale, last_synced_at)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, datetime('now'))
+                            (ploi_id, name, ip_address, provider, region, status, php_versions, php_cli_version, os_name, os_version, is_stale, last_synced_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, datetime('now'))
                         ON CONFLICT(ploi_id) DO UPDATE SET
                             name            = excluded.name,
                             ip_address      = excluded.ip_address,
@@ -86,11 +95,13 @@ class PloiSync
                             status          = excluded.status,
                             php_versions    = excluded.php_versions,
                             php_cli_version = excluded.php_cli_version,
+                            os_name         = excluded.os_name,
+                            os_version      = excluded.os_version,
                             is_stale        = 0,
                             last_synced_at  = excluded.last_synced_at"
                     )->execute([
                         $sid, $name, $ipAddress, $provider, $region,
-                        $statusVal, json_encode($phpVersions), $phpCli,
+                        $statusVal, json_encode($phpVersions), $phpCli, $osRaw, $osVersion,
                     ]);
 
                     // Auto-create a servers record if not already linked
@@ -128,6 +139,13 @@ class PloiSync
         $count = 0;
         $seen = [];
 
+        // Pre-fetch full exclusion list to avoid per-site queries
+        $excludedPloiIds = [];
+        try {
+            $excludedPloiIds = $this->db->query("SELECT ploi_site_id FROM ploi_sync_exclusions")->fetchAll(\PDO::FETCH_COLUMN);
+            $excludedPloiIds = array_map('intval', $excludedPloiIds);
+        } catch (\Throwable) {}
+
         try {
             $ploi = $this->ploiService->sdk();
             $servers = $this->db->query('SELECT id, ploi_id FROM ploi_servers')->fetchAll();
@@ -144,6 +162,9 @@ class PloiSync
                         $siteId = (int)($site['id'] ?? 0);
                         if (!$siteId) continue;
                         $seen[] = $siteId;
+
+                        // Skip excluded sites
+                        if (in_array($siteId, $excludedPloiIds)) continue;
 
                         // Use listing data only — no per-site API calls to avoid timeout
                         $repo   = null;
@@ -196,14 +217,13 @@ class PloiSync
                         $cs->execute([$siteId]);
                         $existingCsId = $cs->fetchColumn();
 
+                        $domain = $site['domain'] ?? ($site['name'] ?? 'unknown');
+
                         if (!$existingCsId) {
                             // Resolve the linked server_id from the ploi_server row
                             $srvRow = $this->db->prepare("SELECT server_id FROM ploi_servers WHERE id = ?");
                             $srvRow->execute([$server['id']]);
                             $linkedServerId = $srvRow->fetchColumn() ?: null;
-
-                            $domain   = $site['domain'] ?? ($site['name'] ?? 'unknown');
-                            $webStack = $projectType;
 
                             $this->db->prepare(
                                 "INSERT INTO client_sites
@@ -211,7 +231,7 @@ class PloiSync
                                 VALUES (NULL, ?, ?, ?, ?, datetime('now'))"
                             )->execute([
                                 $linkedServerId,
-                                $webStack,
+                                $projectType,
                                 $repo,
                                 'Imported from Ploi: ' . $domain,
                             ]);
@@ -219,6 +239,12 @@ class PloiSync
                             $this->db->prepare(
                                 "UPDATE ploi_sites SET client_site_id = ? WHERE ploi_id = ?"
                             )->execute([$newCsId, $siteId]);
+                            $existingCsId = $newCsId;
+                        }
+
+                        // Auto-create or link domain record for this site
+                        if ($existingCsId) {
+                            $this->ensureDomainForSite($domain, (int)$existingCsId, null);
                         }
 
                         $count++;
@@ -237,6 +263,69 @@ class PloiSync
             $this->logComplete($logId, 'failed', $count, $e->getMessage());
             throw $e;
         }
+    }
+
+    /**
+     * Re-process all existing ploi_sites to create/link missing domain records.
+     * Safe to run multiple times — skips sites that already have domain_id set.
+     */
+    public function syncDomains(): int
+    {
+        $logId = $this->logStart('domains');
+        $count = 0;
+        try {
+            $rows = $this->db->query("
+                SELECT ps.domain, cs.id AS cs_id, cs.client_id, cs.domain_id
+                FROM ploi_sites ps
+                JOIN client_sites cs ON cs.id = ps.client_site_id
+                WHERE ps.domain IS NOT NULL AND ps.domain != ''
+            ")->fetchAll();
+
+            foreach ($rows as $row) {
+                if ($this->ensureDomainForSite($row['domain'], (int)$row['cs_id'], $row['client_id'])) {
+                    $count++;
+                }
+            }
+
+            $this->logComplete($logId, 'completed', $count);
+            return $count;
+        } catch (Throwable $e) {
+            $this->logComplete($logId, 'failed', $count, $e->getMessage());
+            throw $e;
+        }
+    }
+
+    /**
+     * Find or create a domain record for the given domain string, then link it to
+     * client_sites.domain_id if not already set. Returns true if a domain was created or linked.
+     */
+    private function ensureDomainForSite(string $domain, int $clientSiteId, ?int $clientId): bool
+    {
+        // Skip Ploi-generated test/preview domains
+        if (str_contains($domain, '.ploi.site') || str_contains($domain, '.ploi-app.site')) {
+            return false;
+        }
+
+        // Don't overwrite an existing domain link
+        $csRow = $this->db->prepare("SELECT domain_id FROM client_sites WHERE id = ? LIMIT 1");
+        $csRow->execute([$clientSiteId]);
+        if ($csRow->fetchColumn()) return false;
+
+        // Look for an existing domain record (case-insensitive)
+        $domRow = $this->db->prepare("SELECT id FROM domains WHERE LOWER(domain) = LOWER(?) LIMIT 1");
+        $domRow->execute([$domain]);
+        $domainId = $domRow->fetchColumn();
+
+        if (!$domainId) {
+            // Create a new domain record
+            $this->db->prepare(
+                "INSERT INTO domains (client_id, domain, cloudflare_proxied, created_at) VALUES (?, ?, 0, datetime('now'))"
+            )->execute([$clientId, $domain]);
+            $domainId = (int)$this->db->lastInsertId();
+        }
+
+        $this->db->prepare("UPDATE client_sites SET domain_id = ? WHERE id = ?")->execute([$domainId, $clientSiteId]);
+        return true;
     }
 
     private function flagStale(string $table, array $seenPloiIds): void

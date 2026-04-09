@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace CoyshCRM\Controllers;
 
+use CoyshCRM\Models\FreeAgentRecurringInvoice;
 use CoyshCRM\Services\FreeAgentClient;
 use CoyshCRM\Services\FreeAgentSync;
 use PDO;
@@ -93,6 +94,30 @@ class FreeAgentController
             LIMIT 20
         ")->fetchAll();
 
+        // ── Recurring invoices ──────────────────────────────────────────────
+        $mrrSql = FreeAgentRecurringInvoice::monthlySql('fri');
+
+        $confirmedMrr = (float)$this->db->query("
+            SELECT COALESCE(SUM($mrrSql), 0)
+            FROM freeagent_recurring_invoices fri
+            WHERE recurring_status = 'Active'
+        ")->fetchColumn();
+
+        $pipelineMrr = (float)$this->db->query("
+            SELECT COALESCE(SUM($mrrSql), 0)
+            FROM freeagent_recurring_invoices fri
+            WHERE recurring_status = 'Draft'
+        ")->fetchColumn();
+
+        $allRecurring = $this->db->query("
+            SELECT fri.*, c.name AS client_name,
+                   ($mrrSql) AS monthly_value
+            FROM freeagent_recurring_invoices fri
+            LEFT JOIN clients c ON c.id = fri.client_id
+            ORDER BY CASE fri.recurring_status WHEN 'Active' THEN 0 ELSE 1 END,
+                     c.name, fri.reference
+        ")->fetchAll();
+
         // ── Sync history ────────────────────────────────────────────────
         $syncHistory = $this->db->query("
             SELECT * FROM freeagent_sync_log
@@ -112,12 +137,15 @@ class FreeAgentController
             ORDER BY started_at DESC LIMIT 1
         ")->fetch() ?: null;
 
+        $allClients = $this->db->query("SELECT id, name FROM clients WHERE status = 'active' ORDER BY name")->fetchAll();
+
         render('freeagent.index', compact(
             'connected',
             'totalInvoiced', 'thisYearInvoiced', 'unpaidInvoiced',
             'totalExpenses', 'thisYearExpenses', 'netIncome',
+            'confirmedMrr', 'pipelineMrr', 'allRecurring',
             'byCategory', 'recentInvoices', 'recentExpenses',
-            'syncHistory', 'lastSync', 'lastError'
+            'syncHistory', 'lastSync', 'lastError', 'allClients'
         ), 'FreeAgent');
     }
 
@@ -143,6 +171,30 @@ class FreeAgentController
             http_response_code(500);
             echo json_encode(['error' => $e->getMessage()]);
         }
+        exit;
+    }
+
+    // ── AJAX: assign client to invoice / recurring invoice ────────────────
+
+    public function updateInvoiceClient(int $id): void
+    {
+        header('Content-Type: application/json');
+        $clientId = $_POST['client_id'] !== '' ? (int)$_POST['client_id'] : null;
+        $this->db->prepare("UPDATE freeagent_invoices SET client_id = ? WHERE id = ?")->execute([$clientId, $id]);
+        $name = $clientId ? $this->db->prepare("SELECT name FROM clients WHERE id = ? LIMIT 1")->execute([$clientId]) && null : null;
+        if ($clientId) { $s = $this->db->prepare("SELECT name FROM clients WHERE id = ? LIMIT 1"); $s->execute([$clientId]); $name = $s->fetchColumn() ?: null; }
+        echo json_encode(['ok' => true, 'client_name' => $name]);
+        exit;
+    }
+
+    public function updateRecurringClient(int $id): void
+    {
+        header('Content-Type: application/json');
+        $clientId = $_POST['client_id'] !== '' ? (int)$_POST['client_id'] : null;
+        $this->db->prepare("UPDATE freeagent_recurring_invoices SET client_id = ? WHERE id = ?")->execute([$clientId, $id]);
+        $name = null;
+        if ($clientId) { $s = $this->db->prepare("SELECT name FROM clients WHERE id = ? LIMIT 1"); $s->execute([$clientId]); $name = $s->fetchColumn() ?: null; }
+        echo json_encode(['ok' => true, 'client_name' => $name]);
         exit;
     }
 

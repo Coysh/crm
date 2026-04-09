@@ -62,6 +62,81 @@
         <?php endforeach ?>
     </div>
 
+    <!-- Recurring Income -->
+    <div class="bg-white border border-slate-200 rounded-lg overflow-hidden">
+        <div class="px-5 py-3 border-b border-slate-200 flex items-center justify-between gap-4">
+            <div class="flex items-center gap-6">
+                <h2 class="text-sm font-semibold text-slate-700">Recurring Income</h2>
+                <span class="text-sm text-slate-800 font-medium"><?= money($confirmedMrr) ?> <span class="text-xs font-normal text-slate-400">confirmed monthly recurring</span></span>
+                <?php if ($pipelineMrr > 0): ?>
+                    <span class="text-sm text-amber-600 font-medium"><?= money($pipelineMrr) ?> <span class="text-xs font-normal text-amber-500">pipeline monthly recurring</span></span>
+                    <span class="text-xs text-slate-400"><?= money(($confirmedMrr + $pipelineMrr) * 12) ?> / yr (all)</span>
+                <?php else: ?>
+                    <span class="text-xs text-slate-400"><?= money($confirmedMrr * 12) ?> / yr</span>
+                <?php endif ?>
+            </div>
+            <div class="flex gap-2 shrink-0">
+                <button onclick="filterRecurring('all')" id="rfil-all"
+                        class="px-2.5 py-1 rounded text-xs font-medium bg-slate-100 text-slate-700 hover:bg-slate-200">All</button>
+                <button onclick="filterRecurring('Active')" id="rfil-Active"
+                        class="px-2.5 py-1 rounded text-xs font-medium text-slate-500 hover:bg-slate-100">Active</button>
+                <button onclick="filterRecurring('Draft')" id="rfil-Draft"
+                        class="px-2.5 py-1 rounded text-xs font-medium text-slate-500 hover:bg-slate-100">Draft</button>
+            </div>
+        </div>
+        <?php if ($allRecurring): ?>
+        <div class="overflow-x-auto">
+        <table class="w-full text-sm" id="recurring-table">
+            <thead class="bg-slate-50 text-xs text-slate-500 uppercase tracking-wide">
+                <tr>
+                    <th class="px-4 py-2.5 text-left cursor-pointer hover:text-slate-800" onclick="sortRecurring(0)">Client</th>
+                    <th class="px-4 py-2.5 text-left cursor-pointer hover:text-slate-800" onclick="sortRecurring(1)">Reference</th>
+                    <th class="px-4 py-2.5 text-left cursor-pointer hover:text-slate-800" onclick="sortRecurring(2)">Frequency</th>
+                    <th class="px-4 py-2.5 text-right cursor-pointer hover:text-slate-800" onclick="sortRecurring(3)">Total Value</th>
+                    <th class="px-4 py-2.5 text-right cursor-pointer hover:text-slate-800" onclick="sortRecurring(4)">Monthly Equiv.</th>
+                    <th class="px-4 py-2.5 text-center cursor-pointer hover:text-slate-800" onclick="sortRecurring(5)">Status</th>
+                    <th class="px-4 py-2.5 text-left cursor-pointer hover:text-slate-800" onclick="sortRecurring(6)">Next Invoice</th>
+                </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-100">
+                <?php foreach ($allRecurring as $ri):
+                    $isActive = $ri['recurring_status'] === 'Active';
+                    $statusBadge = $isActive ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700';
+                ?>
+                    <tr class="hover:bg-slate-50 ri-row" data-status="<?= e($ri['recurring_status']) ?>">
+                        <td class="px-4 py-2.5 font-medium" data-value="<?= e($ri['client_name'] ?? '') ?>" id="fa-ri-client-<?= $ri['id'] ?>">
+                            <?php if ($ri['client_id']): ?>
+                                <a href="/clients/<?= $ri['client_id'] ?>" class="text-accent-600 hover:underline"><?= e($ri['client_name'] ?? 'Unknown') ?></a>
+                            <?php else: ?>
+                                <select onchange="assignFaClient('recurring', <?= $ri['id'] ?>, this)"
+                                        class="border border-slate-200 rounded px-2 py-0.5 text-xs text-slate-500 focus:outline-none focus:ring-1 focus:ring-accent-400">
+                                    <option value="">— Assign client —</option>
+                                    <?php foreach ($allClients as $c): ?>
+                                        <option value="<?= $c['id'] ?>"><?= e($c['name']) ?></option>
+                                    <?php endforeach ?>
+                                </select>
+                            <?php endif ?>
+                        </td>
+                        <td class="px-4 py-2.5 font-mono text-xs" data-value="<?= e($ri['reference'] ?? '') ?>"><?= freeagentLink($ri['freeagent_url'] ?? null, $ri['reference'] ?: '—') ?></td>
+                        <td class="px-4 py-2.5 text-slate-500" data-value="<?= e($ri['frequency']) ?>"><?= e($ri['frequency']) ?></td>
+                        <td class="px-4 py-2.5 text-right tabular-nums font-medium" data-value="<?= (float)$ri['total_value'] ?>"><?= money($ri['total_value']) ?></td>
+                        <td class="px-4 py-2.5 text-right tabular-nums text-slate-600" data-value="<?= round((float)$ri['monthly_value'], 4) ?>"><?= money($ri['monthly_value']) ?></td>
+                        <td class="px-4 py-2.5 text-center" data-value="<?= e($ri['recurring_status']) ?>">
+                            <span class="inline-block px-2 py-0.5 rounded-full text-xs font-medium <?= $statusBadge ?>">
+                                <?= e($ri['recurring_status']) ?>
+                            </span>
+                        </td>
+                        <td class="px-4 py-2.5 text-slate-500" data-value="<?= e($ri['next_recurs_on'] ?? '') ?>"><?= formatDate($ri['next_recurs_on']) ?></td>
+                    </tr>
+                <?php endforeach ?>
+            </tbody>
+        </table>
+        </div>
+        <?php else: ?>
+            <p class="px-5 py-6 text-sm text-slate-400">No recurring invoices synced yet. Run a sync to pull them from FreeAgent.</p>
+        <?php endif ?>
+    </div>
+
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
 
         <!-- Income by Category -->
@@ -151,16 +226,30 @@
                         'sent'    => 'bg-blue-100 text-blue-700',
                         default   => 'bg-slate-100 text-slate-600',
                     };
+                    $isHiveage = isset($inv['source']) && $inv['source'] === 'hiveage';
                     ?>
                     <tr class="hover:bg-slate-50">
-                        <td class="px-4 py-2.5">
+                        <td class="px-4 py-2.5" id="fa-inv-client-<?= $inv['id'] ?>">
                             <?php if ($inv['client_id']): ?>
                                 <a href="/clients/<?= $inv['client_id'] ?>" class="text-accent-600 hover:underline"><?= e($inv['client_name'] ?? '—') ?></a>
                             <?php else: ?>
-                                <span class="text-slate-400">Unmatched</span>
+                                <select onchange="assignFaClient('invoices', <?= $inv['id'] ?>, this)"
+                                        class="border border-slate-200 rounded px-2 py-0.5 text-xs text-slate-500 focus:outline-none focus:ring-1 focus:ring-accent-400">
+                                    <option value="">— Assign client —</option>
+                                    <?php foreach ($allClients as $c): ?>
+                                        <option value="<?= $c['id'] ?>"><?= e($c['name']) ?></option>
+                                    <?php endforeach ?>
+                                </select>
                             <?php endif ?>
                         </td>
-                        <td class="px-4 py-2.5 font-mono text-xs"><?= e($inv['reference'] ?: '—') ?></td>
+                        <td class="px-4 py-2.5 font-mono text-xs">
+                            <?php if ($isHiveage): ?>
+                                <?= e($inv['reference'] ?: '—') ?>
+                                <span class="ml-1 inline-block px-1 py-0.5 rounded text-xs font-medium bg-slate-100 text-slate-500">Hiveage</span>
+                            <?php else: ?>
+                                <?= freeagentLink($inv['freeagent_url'] ?? null, $inv['reference'] ?: '—') ?>
+                            <?php endif ?>
+                        </td>
                         <td class="px-4 py-2.5 text-right tabular-nums font-medium"><?= money($inv['total_value']) ?></td>
                         <td class="px-4 py-2.5 text-center">
                             <span class="inline-block px-2 py-0.5 rounded-full text-xs font-medium <?= $statusColor ?>">
@@ -201,7 +290,7 @@
                 $expCats = \CoyshCRM\Models\Expense::categories();
                 foreach ($recentExpenses as $tx): ?>
                     <tr class="hover:bg-slate-50">
-                        <td class="px-4 py-2.5"><?= e($tx['description'] ?: '—') ?></td>
+                        <td class="px-4 py-2.5"><?= freeagentLink($tx['freeagent_url'] ?? null, $tx['description'] ?: '—') ?></td>
                         <td class="px-4 py-2.5 text-right tabular-nums text-red-600 font-medium"><?= money(abs($tx['gross_value'])) ?></td>
                         <td class="px-4 py-2.5 text-slate-500 font-mono text-xs"><?= e($tx['freeagent_category'] ?: '—') ?></td>
                         <td class="px-4 py-2.5 text-slate-500"><?= e($expCats[$tx['crm_category']] ?? ($tx['crm_category'] ? $tx['crm_category'] : '—')) ?></td>
@@ -219,6 +308,57 @@
 </div>
 
 <script>
+// ── Recurring table: filter by status ──────────────────────────────────────
+function filterRecurring(status) {
+    document.querySelectorAll('.ri-row').forEach(row => {
+        row.style.display = (status === 'all' || row.dataset.status === status) ? '' : 'none';
+    });
+    ['all','Active','Draft'].forEach(s => {
+        const btn = document.getElementById('rfil-' + s);
+        if (!btn) return;
+        btn.className = s === status
+            ? 'px-2.5 py-1 rounded text-xs font-medium bg-slate-100 text-slate-700 hover:bg-slate-200'
+            : 'px-2.5 py-1 rounded text-xs font-medium text-slate-500 hover:bg-slate-100';
+    });
+}
+
+// ── Recurring table: sort by column ────────────────────────────────────────
+let recurringSort = { col: -1, dir: 1 };
+function sortRecurring(col) {
+    if (recurringSort.col === col) { recurringSort.dir *= -1; } else { recurringSort.col = col; recurringSort.dir = 1; }
+    const tbody = document.querySelector('#recurring-table tbody');
+    const rows  = Array.from(tbody.querySelectorAll('tr.ri-row'));
+    rows.sort((a, b) => {
+        const av = a.cells[col]?.dataset.value ?? '';
+        const bv = b.cells[col]?.dataset.value ?? '';
+        const an = parseFloat(av), bn = parseFloat(bv);
+        if (!isNaN(an) && !isNaN(bn)) return (an - bn) * recurringSort.dir;
+        return av.localeCompare(bv) * recurringSort.dir;
+    });
+    rows.forEach(r => tbody.appendChild(r));
+}
+
+// ── Inline client assignment (invoices + recurring) ───────────────────────
+function assignFaClient(type, id, select) {
+    const clientId = select.value;
+    if (!clientId) return;
+    const cell = document.getElementById('fa-' + (type === 'invoices' ? 'inv' : 'ri') + '-client-' + id);
+    const url  = type === 'invoices' ? '/freeagent/invoices/' + id + '/client'
+                                     : '/freeagent/recurring/' + id + '/client';
+    fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: 'client_id=' + encodeURIComponent(clientId),
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.ok) {
+            cell.innerHTML = '<a href="/clients/' + clientId + '" class="text-accent-600 hover:underline">' + data.client_name + '</a>';
+        }
+    })
+    .catch(() => select.value = '');
+}
+
 function runSync() {
     const btn     = document.getElementById('sync-btn');
     const label   = document.getElementById('sync-label');

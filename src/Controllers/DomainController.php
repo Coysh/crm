@@ -100,6 +100,7 @@ class DomainController
             'cloudflare_proxied' => isset($post['cloudflare_proxied']) ? 1 : 0,
             'renewal_date'       => $post['renewal_date'] ?: null,
             'annual_cost'        => $post['annual_cost'] !== '' ? (float)$post['annual_cost'] : null,
+            'currency'           => in_array($post['currency'] ?? '', ['GBP','USD','EUR']) ? $post['currency'] : 'GBP',
         ];
     }
 
