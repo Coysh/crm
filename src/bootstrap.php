@@ -10,7 +10,8 @@ define('VIEW_PATH', BASE_PATH . '/src/Views');
 require BASE_PATH . '/vendor/autoload.php';
 
 // Error handling
-ini_set('display_errors', '1');
+$isProduction = ($_ENV['APP_ENV'] ?? getenv('APP_ENV')) === 'production';
+ini_set('display_errors', $isProduction ? '0' : '1');
 error_reporting(E_ALL);
 ini_set('max_execution_time', '120'); // Allow longer execution for API syncs
 

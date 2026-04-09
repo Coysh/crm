@@ -1,5 +1,6 @@
 # Dependencies
 vendor/
+node_modules/
 
 # Database — contains all client data and FreeAgent OAuth tokens
 data/*.db
