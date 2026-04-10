@@ -641,87 +641,130 @@ if (isset($db)) {
             <p class="text-sm text-slate-400">Loading FreeAgent data…</p>
         </div>
         <script>
-        fetch('/freeagent/client/<?= $client['id'] ?>')
-            .then(r => r.json())
-            .then(data => {
-                const container = document.getElementById('fa-data');
-                if (!data.invoices.length && !data.transactions.length) {
-                    container.innerHTML = '<p class="text-sm text-slate-400">No invoices or transactions linked to this client.</p>';
-                    return;
-                }
+        function escHtml(s) {
+            return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+        }
 
-                let html = '';
+        function loadFaData() {
+            fetch('/freeagent/client/<?= $client['id'] ?>')
+                .then(r => r.json())
+                .then(data => {
+                    const container = document.getElementById('fa-data');
+                    if (!data.invoices.length && !data.transactions.length) {
+                        container.innerHTML = '<p class="text-sm text-slate-400">No invoices or transactions linked to this client.</p>';
+                        return;
+                    }
 
-                // Summary
-                html += '<div class="bg-white border border-slate-200 rounded-lg p-4">'
-                      + '<p class="text-xs text-slate-400 uppercase tracking-wide font-medium">Total Invoiced</p>'
-                      + '<p class="text-lg font-semibold text-slate-800 mt-0.5">£' + data.totalInvoiced.toFixed(2) + '</p>'
-                      + '</div>';
+                    let html = '';
 
-                // Invoices
-                if (data.invoices.length) {
-                    html += '<div class="bg-white border border-slate-200 rounded-lg overflow-hidden">'
-                          + '<div class="px-4 py-2.5 border-b border-slate-200 text-xs font-semibold text-slate-600 uppercase tracking-wide">Invoices</div>'
-                          + '<div class="overflow-x-auto"><table class="w-full text-sm">'
-                          + '<thead class="bg-slate-50 text-xs text-slate-500 uppercase tracking-wide"><tr>'
-                          + '<th class="px-4 py-2 text-left">Reference</th>'
-                          + '<th class="px-4 py-2 text-right">Amount</th>'
-                          + '<th class="px-4 py-2 text-center">Status</th>'
-                          + '<th class="px-4 py-2 text-left">Date</th>'
-                          + '<th class="px-4 py-2 text-left">Source</th>'
-                          + '</tr></thead><tbody class="divide-y divide-slate-100">';
-                    data.invoices.forEach(inv => {
-                        const statusClr = inv.status === 'paid' ? 'bg-green-100 text-green-700'
-                                        : inv.status === 'overdue' ? 'bg-red-100 text-red-700'
-                                        : inv.status === 'sent' ? 'bg-blue-100 text-blue-700'
-                                        : 'bg-slate-100 text-slate-600';
-                        const isHiveage = inv.source === 'hiveage';
-                        const faNumericId = inv.freeagent_url ? inv.freeagent_url.split('/').pop() : null;
-                        const refCell = (!isHiveage && faNumericId)
-                            ? `<a href="https://coyshdigital.freeagent.com/invoices/${faNumericId}" target="_blank" rel="noopener" class="font-mono text-xs text-accent-600 hover:underline">${inv.reference || '—'}</a>`
-                            : `<span class="font-mono text-xs">${inv.reference || '—'}</span>`;
-                        const sourceBadge = isHiveage
-                            ? '<span class="inline-block px-1.5 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-700">Hiveage</span>'
-                            : '<span class="text-xs text-slate-400">FreeAgent</span>';
-                        html += `<tr class="hover:bg-slate-50">
-                            <td class="px-4 py-2">${refCell}</td>
-                            <td class="px-4 py-2 text-right tabular-nums font-medium">£${parseFloat(inv.total_value).toFixed(2)}</td>
-                            <td class="px-4 py-2 text-center"><span class="inline-block px-2 py-0.5 rounded-full text-xs font-medium ${statusClr}">${inv.status || 'unknown'}</span></td>
-                            <td class="px-4 py-2 text-slate-500">${inv.dated_on || '—'}</td>
-                            <td class="px-4 py-2">${sourceBadge}</td>
-                        </tr>`;
-                    });
-                    html += '</tbody></table></div></div>';
-                }
+                    // Summary
+                    html += '<div class="bg-white border border-slate-200 rounded-lg p-4">'
+                          + '<p class="text-xs text-slate-400 uppercase tracking-wide font-medium">Total Invoiced</p>'
+                          + '<p class="text-lg font-semibold text-slate-800 mt-0.5">£' + data.totalInvoiced.toFixed(2) + '</p>'
+                          + '</div>';
 
-                // Transactions
-                if (data.transactions.length) {
-                    html += '<div class="bg-white border border-slate-200 rounded-lg overflow-hidden">'
-                          + '<div class="px-4 py-2.5 border-b border-slate-200 text-xs font-semibold text-slate-600 uppercase tracking-wide">Bank Transactions (expenses)</div>'
-                          + '<div class="overflow-x-auto"><table class="w-full text-sm">'
-                          + '<thead class="bg-slate-50 text-xs text-slate-500 uppercase tracking-wide"><tr>'
-                          + '<th class="px-4 py-2 text-left">Description</th>'
-                          + '<th class="px-4 py-2 text-right">Amount</th>'
-                          + '<th class="px-4 py-2 text-left">Category</th>'
-                          + '<th class="px-4 py-2 text-left">Date</th>'
-                          + '</tr></thead><tbody class="divide-y divide-slate-100">';
-                    data.transactions.forEach(tx => {
-                        html += `<tr class="hover:bg-slate-50">
-                            <td class="px-4 py-2">${tx.description || '—'}</td>
-                            <td class="px-4 py-2 text-right tabular-nums text-red-600 font-medium">£${Math.abs(parseFloat(tx.gross_value)).toFixed(2)}</td>
-                            <td class="px-4 py-2 text-slate-500 font-mono text-xs">${tx.freeagent_category || '—'}</td>
-                            <td class="px-4 py-2 text-slate-500">${tx.dated_on || '—'}</td>
-                        </tr>`;
-                    });
-                    html += '</tbody></table></div></div>';
-                }
+                    // Invoices
+                    if (data.invoices.length) {
+                        html += '<div class="bg-white border border-slate-200 rounded-lg overflow-hidden">'
+                              + '<div class="px-4 py-2.5 border-b border-slate-200 text-xs font-semibold text-slate-600 uppercase tracking-wide">Invoices</div>'
+                              + '<div class="overflow-x-auto"><table class="w-full text-sm">'
+                              + '<thead class="bg-slate-50 text-xs text-slate-500 uppercase tracking-wide"><tr>'
+                              + '<th class="px-4 py-2 text-left">Reference</th>'
+                              + '<th class="px-4 py-2 text-right">Amount</th>'
+                              + '<th class="px-4 py-2 text-center">Status</th>'
+                              + '<th class="px-4 py-2 text-left">Date</th>'
+                              + '<th class="px-4 py-2 text-left">Source</th>'
+                              + '<th class="px-4 py-2"></th>'
+                              + '</tr></thead><tbody class="divide-y divide-slate-100">';
+                        data.invoices.forEach(inv => {
+                            const effectiveStatus = inv.status_override || inv.status;
+                            const statusClr = effectiveStatus === 'paid'    ? 'bg-green-100 text-green-700'
+                                            : effectiveStatus === 'overdue' ? 'bg-red-100 text-red-700'
+                                            : effectiveStatus === 'sent'    ? 'bg-blue-100 text-blue-700'
+                                            : 'bg-slate-100 text-slate-600';
+                            const isHiveage = inv.source === 'hiveage';
+                            const faNumericId = inv.freeagent_url ? inv.freeagent_url.split('/').pop() : null;
+                            const refCell = (!isHiveage && faNumericId)
+                                ? `<a href="https://coyshdigital.freeagent.com/invoices/${faNumericId}" target="_blank" rel="noopener" class="font-mono text-xs text-accent-600 hover:underline">${inv.reference || '—'}</a>`
+                                : `<span class="font-mono text-xs">${inv.reference || '—'}</span>`;
+                            const sourceBadge = isHiveage
+                                ? '<span class="inline-block px-1.5 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-700">Hiveage</span>'
+                                : '<span class="text-xs text-slate-400">FreeAgent</span>';
+                            const overrideIndicator = inv.status_override
+                                ? `<span class="inline-block ml-1 px-1 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-700" title="${escHtml(inv.status_override_note || 'Manually overridden')}">Manual</span>`
+                                : '';
+                            const paidSel    = inv.status_override === 'paid'    ? ' selected' : '';
+                            const sentSel    = inv.status_override === 'sent'    ? ' selected' : '';
+                            const overdueSel = inv.status_override === 'overdue' ? ' selected' : '';
+                            html += `<tr class="hover:bg-slate-50">
+                                <td class="px-4 py-2">${refCell}</td>
+                                <td class="px-4 py-2 text-right tabular-nums font-medium">£${parseFloat(inv.total_value).toFixed(2)}</td>
+                                <td class="px-4 py-2 text-center"><span class="inline-block px-2 py-0.5 rounded-full text-xs font-medium ${statusClr}">${effectiveStatus || 'unknown'}</span>${overrideIndicator}</td>
+                                <td class="px-4 py-2 text-slate-500">${inv.dated_on || '—'}</td>
+                                <td class="px-4 py-2">${sourceBadge}</td>
+                                <td class="px-4 py-2 text-right"><button type="button" onclick="showInvOverride(${inv.id})" class="text-xs text-slate-400 hover:text-slate-600 underline">Override</button></td>
+                            </tr>
+                            <tr id="invovr-${inv.id}" class="hidden">
+                                <td colspan="6" class="px-4 py-3 bg-amber-50 border-t border-amber-100">
+                                    <div class="flex items-center gap-2 flex-wrap">
+                                        <span class="text-xs text-slate-500 whitespace-nowrap">Override status:</span>
+                                        <select id="invovrs-${inv.id}" class="text-sm border border-slate-300 rounded px-2 py-1">
+                                            <option value="">— clear override —</option>
+                                            <option value="paid"${paidSel}>paid</option>
+                                            <option value="sent"${sentSel}>sent</option>
+                                            <option value="overdue"${overdueSel}>overdue</option>
+                                        </select>
+                                        <input type="text" id="invovrn-${inv.id}" value="${escHtml(inv.status_override_note || '')}" placeholder="Reason (optional)" class="flex-1 min-w-0 text-sm border border-slate-300 rounded px-2 py-1">
+                                        <button type="button" onclick="saveInvOverride(${inv.id})" class="text-sm px-3 py-1 rounded bg-accent-600 text-white">Save</button>
+                                        <button type="button" onclick="hideInvOverride(${inv.id})" class="text-sm px-3 py-1 text-slate-500">Cancel</button>
+                                    </div>
+                                </td>
+                            </tr>`;
+                        });
+                        html += '</tbody></table></div></div>';
+                    }
 
-                container.innerHTML = html;
-            })
-            .catch(() => {
-                document.getElementById('fa-data').innerHTML =
-                    '<p class="text-sm text-red-500">Failed to load FreeAgent data.</p>';
-            });
+                    // Transactions
+                    if (data.transactions.length) {
+                        html += '<div class="bg-white border border-slate-200 rounded-lg overflow-hidden">'
+                              + '<div class="px-4 py-2.5 border-b border-slate-200 text-xs font-semibold text-slate-600 uppercase tracking-wide">Bank Transactions (expenses)</div>'
+                              + '<div class="overflow-x-auto"><table class="w-full text-sm">'
+                              + '<thead class="bg-slate-50 text-xs text-slate-500 uppercase tracking-wide"><tr>'
+                              + '<th class="px-4 py-2 text-left">Description</th>'
+                              + '<th class="px-4 py-2 text-right">Amount</th>'
+                              + '<th class="px-4 py-2 text-left">Category</th>'
+                              + '<th class="px-4 py-2 text-left">Date</th>'
+                              + '</tr></thead><tbody class="divide-y divide-slate-100">';
+                        data.transactions.forEach(tx => {
+                            html += `<tr class="hover:bg-slate-50">
+                                <td class="px-4 py-2">${tx.description || '—'}</td>
+                                <td class="px-4 py-2 text-right tabular-nums text-red-600 font-medium">£${Math.abs(parseFloat(tx.gross_value)).toFixed(2)}</td>
+                                <td class="px-4 py-2 text-slate-500 font-mono text-xs">${tx.freeagent_category || '—'}</td>
+                                <td class="px-4 py-2 text-slate-500">${tx.dated_on || '—'}</td>
+                            </tr>`;
+                        });
+                        html += '</tbody></table></div></div>';
+                    }
+
+                    container.innerHTML = html;
+                })
+                .catch(() => {
+                    document.getElementById('fa-data').innerHTML =
+                        '<p class="text-sm text-red-500">Failed to load FreeAgent data.</p>';
+                });
+        }
+
+        function showInvOverride(id) { document.getElementById('invovr-' + id).classList.remove('hidden'); }
+        function hideInvOverride(id) { document.getElementById('invovr-' + id).classList.add('hidden'); }
+        function saveInvOverride(id) {
+            const fd = new FormData();
+            fd.append('status_override', document.getElementById('invovrs-' + id).value);
+            fd.append('status_override_note', document.getElementById('invovrn-' + id).value);
+            fetch('/freeagent/invoices/' + id + '/status-override', { method: 'POST', body: fd })
+                .then(() => loadFaData());
+        }
+
+        loadFaData();
         </script>
         <?php else: ?>
             <p class="text-sm text-slate-400">Map a FreeAgent contact to this client to see invoice and transaction data here.</p>

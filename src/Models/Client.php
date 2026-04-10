@@ -422,10 +422,14 @@ class Client extends Model
         } catch (\Throwable) { $hasRecentInvoice = true; }
         if (!$hasRecentInvoice) $flags[] = 'no_recent_invoice';
 
+        $thirtyDaysAgo = date('Y-m-d', strtotime('-30 days'));
         try {
             $hasOverdue = (bool)$this->query(
-                "SELECT 1 FROM freeagent_invoices WHERE client_id = ? AND (status = 'overdue' OR (status = 'sent' AND due_date < ?)) LIMIT 1",
-                [$clientId, $today]
+                "SELECT 1 FROM freeagent_invoices WHERE client_id = ?
+                 AND (COALESCE(status_override, status) = 'overdue'
+                      OR (COALESCE(status_override, status) = 'sent' AND dated_on < ?))
+                 LIMIT 1",
+                [$clientId, $thirtyDaysAgo]
             )->fetchColumn();
         } catch (\Throwable) { $hasOverdue = false; }
         if ($hasOverdue) $flags[] = 'overdue_invoices';
@@ -454,8 +458,8 @@ class Client extends Model
 
     public function getHealthAll(): array
     {
-        $today        = date('Y-m-d');
-        $twelveMonAgo = date('Y-m-d', strtotime('-12 months'));
+        $thirtyDaysAgo = date('Y-m-d', strtotime('-30 days'));
+        $twelveMonAgo  = date('Y-m-d', strtotime('-12 months'));
 
         $activeClients = $this->query("SELECT id, COALESCE(client_type,'managed') AS client_type, COALESCE(agreement_notes,'') AS agreement_notes FROM clients WHERE status = 'active'")->fetchAll();
         if (!$activeClients) return [];
@@ -480,8 +484,11 @@ class Client extends Model
         $overdueIds = [];
         try {
             $overdueIds = $this->query(
-                "SELECT DISTINCT client_id FROM freeagent_invoices WHERE client_id IS NOT NULL AND (status = 'overdue' OR (status = 'sent' AND due_date < ?))",
-                [$today]
+                "SELECT DISTINCT client_id FROM freeagent_invoices
+                 WHERE client_id IS NOT NULL
+                   AND (COALESCE(status_override, status) = 'overdue'
+                        OR (COALESCE(status_override, status) = 'sent' AND dated_on < ?))",
+                [$thirtyDaysAgo]
             )->fetchAll(\PDO::FETCH_COLUMN);
         } catch (\Throwable) {}
         $overdueSet = array_flip($overdueIds);
