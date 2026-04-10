@@ -124,14 +124,11 @@ class FreeAgentSync
                         $contactName = $stmt->fetchColumn() ?: null;
                     }
 
-                    // Preserve manually-set client_id — only update if currently null
-                    $existingClientId = null;
-                    if ($clientId === null) {
-                        $ecStmt = $this->db->prepare("SELECT client_id FROM freeagent_recurring_invoices WHERE freeagent_url = ? LIMIT 1");
-                        $ecStmt->execute([$url]);
-                        $existingClientId = $ecStmt->fetchColumn() ?: null;
-                    }
-                    $resolvedClientId = $clientId ?? $existingClientId;
+                    // Let the contact mapping always win; only fall back to the existing
+                    // client_id when this contact has no mapping (i.e. $clientId is null).
+                    // This allows fixing a wrong contact-to-client mapping and re-syncing
+                    // to propagate the correction automatically.
+                    $resolvedClientId = $clientId;
 
                     // FreeAgent returns 'recurring_status' field; fall back to deriving from view name
                     $recurringStatus = $ri['recurring_status']
@@ -151,7 +148,7 @@ class FreeAgentSync
                         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'))
                         ON CONFLICT(freeagent_url) DO UPDATE SET
                             freeagent_contact_url  = excluded.freeagent_contact_url,
-                            client_id              = CASE WHEN freeagent_recurring_invoices.client_id IS NOT NULL THEN freeagent_recurring_invoices.client_id ELSE excluded.client_id END,
+                            client_id              = CASE WHEN excluded.client_id IS NOT NULL THEN excluded.client_id ELSE freeagent_recurring_invoices.client_id END,
                             reference              = excluded.reference,
                             frequency              = excluded.frequency,
                             recurring_status       = excluded.recurring_status,
