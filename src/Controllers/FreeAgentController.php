@@ -49,7 +49,7 @@ class FreeAgentController
 
         $unpaidInvoiced = (float)$this->db->query("
             SELECT COALESCE(SUM(total_value), 0) FROM freeagent_invoices
-            WHERE status IN ('sent', 'overdue')
+            WHERE COALESCE(status_override, status) IN ('sent', 'overdue')
         ")->fetchColumn();
 
         $totalExpenses = (float)$this->db->query("

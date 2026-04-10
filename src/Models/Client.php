@@ -48,10 +48,10 @@ class Client extends Model
                 WHERE fri.client_id = c.id AND fri.recurring_status = 'Active') THEN 1 ELSE 0 END) AS has_recurring,
             (SELECT COALESCE(SUM(fi.total_value), 0)
              FROM freeagent_invoices fi WHERE fi.client_id = c.id
-               AND fi.status IN ('paid','sent','overdue')) AS total_invoiced,
+               AND COALESCE(fi.status_override, fi.status) IN ('paid','sent','overdue')) AS total_invoiced,
             (SELECT COALESCE(SUM(fi.total_value), 0)
              FROM freeagent_invoices fi WHERE fi.client_id = c.id
-               AND fi.status IN ('sent','overdue')) AS outstanding
+               AND COALESCE(fi.status_override, fi.status) IN ('sent','overdue')) AS outstanding
             {$cfSelect}
         FROM clients c WHERE 1=1";
 
@@ -543,7 +543,7 @@ class Client extends Model
         $totalInvoiced = 0.0;
         try {
             $totalInvoiced = (float)$this->query(
-                "SELECT COALESCE(SUM(total_value), 0) FROM freeagent_invoices WHERE client_id = ? AND status IN ('paid','sent','overdue')",
+                "SELECT COALESCE(SUM(total_value), 0) FROM freeagent_invoices WHERE client_id = ? AND COALESCE(status_override, status) IN ('paid','sent','overdue')",
                 [$clientId]
             )->fetchColumn();
         } catch (\Throwable) {}
