@@ -39,9 +39,19 @@
                 </dd>
             </div>
             <div>
-                <dt class="text-xs text-slate-500 uppercase tracking-wide">Annual Cost</dt>
+                <dt class="text-xs text-slate-500 uppercase tracking-wide">Renewal Period</dt>
+                <dd class="mt-0.5 text-slate-800"><?= (int)($domain['renewal_years'] ?? 1) ?> year<?= (int)($domain['renewal_years'] ?? 1) > 1 ? 's' : '' ?></dd>
+            </div>
+            <div>
+                <dt class="text-xs text-slate-500 uppercase tracking-wide">My Cost <span class="text-slate-400 font-normal">(per renewal)</span></dt>
                 <dd class="mt-0.5 font-medium text-slate-800">
                     <?= $domain['annual_cost'] !== null ? formatCurrency($domain['annual_cost'], $domain['currency'] ?? 'GBP') : '<span class="text-slate-400">—</span>' ?>
+                </dd>
+            </div>
+            <div>
+                <dt class="text-xs text-slate-500 uppercase tracking-wide">Client Charge <span class="text-slate-400 font-normal">(per renewal)</span></dt>
+                <dd class="mt-0.5 font-medium text-slate-800">
+                    <?= ($domain['client_charge'] ?? null) !== null ? formatCurrency($domain['client_charge'], $domain['currency'] ?? 'GBP') : '<span class="text-slate-400">—</span>' ?>
                 </dd>
             </div>
         </dl>

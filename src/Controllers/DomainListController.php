@@ -360,7 +360,9 @@ class DomainListController
             'registrar'          => trim($post['registrar'] ?? ''),
             'cloudflare_proxied' => isset($post['cloudflare_proxied']) ? 1 : 0,
             'renewal_date'       => $post['renewal_date'] ?: null,
-            'annual_cost'        => $post['annual_cost'] !== '' ? (float)$post['annual_cost'] : null,
+            'renewal_years'      => max(1, (int)($post['renewal_years'] ?? 1)),
+            'annual_cost'        => ($post['annual_cost'] ?? '') !== '' ? (float)$post['annual_cost'] : null,
+            'client_charge'      => ($post['client_charge'] ?? '') !== '' ? (float)$post['client_charge'] : null,
             'currency'           => in_array($post['currency'] ?? '', ['GBP','USD','EUR']) ? $post['currency'] : 'GBP',
         ];
     }

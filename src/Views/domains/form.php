@@ -42,7 +42,20 @@
                        class="w-full border border-slate-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent-500">
             </div>
             <div>
-                <label for="annual_cost" class="block text-sm font-medium text-slate-700 mb-1">Annual Cost</label>
+                <label for="renewal_years" class="block text-sm font-medium text-slate-700 mb-1">Renewal Period</label>
+                <select id="renewal_years" name="renewal_years"
+                        class="w-full border border-slate-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent-500 bg-white">
+                    <?php for ($y = 1; $y <= 10; $y++): ?>
+                        <option value="<?= $y ?>" <?= (int)($domain['renewal_years'] ?? 1) === $y ? 'selected' : '' ?>><?= $y ?> year<?= $y > 1 ? 's' : '' ?></option>
+                    <?php endfor ?>
+                </select>
+            </div>
+        </div>
+
+        <?php $annualCost = $domain['annual_cost'] ?? null; ?>
+        <div class="grid grid-cols-2 gap-4">
+            <div>
+                <label for="annual_cost" class="block text-sm font-medium text-slate-700 mb-1">My Cost <span class="text-slate-400 font-normal text-xs">(per renewal)</span></label>
                 <div class="flex gap-2">
                     <select name="currency" class="border border-slate-300 rounded px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent-500 bg-white">
                         <?php foreach (['GBP' => '£ GBP', 'USD' => '$ USD', 'EUR' => '€ EUR'] as $code => $label): ?>
@@ -50,9 +63,16 @@
                         <?php endforeach ?>
                     </select>
                     <input type="number" id="annual_cost" name="annual_cost" step="0.01" min="0"
-                           value="<?= $domain['annual_cost'] !== null && $domain['annual_cost'] !== '' ? number_format((float)$domain['annual_cost'], 2) : '' ?>"
+                           value="<?= $annualCost !== null && $annualCost !== '' ? number_format((float)$annualCost, 2) : '' ?>"
                            class="flex-1 border border-slate-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent-500">
                 </div>
+            </div>
+            <div>
+                <?php $clientCharge = $domain['client_charge'] ?? null; ?>
+                <label for="client_charge" class="block text-sm font-medium text-slate-700 mb-1">Client Charge <span class="text-slate-400 font-normal text-xs">(per renewal)</span></label>
+                <input type="number" id="client_charge" name="client_charge" step="0.01" min="0"
+                       value="<?= $clientCharge !== null && $clientCharge !== '' ? number_format((float)$clientCharge, 2) : '' ?>"
+                       class="flex-1 w-full border border-slate-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent-500">
             </div>
         </div>
 
