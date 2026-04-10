@@ -70,9 +70,16 @@
             <div>
                 <?php $clientCharge = $domain['client_charge'] ?? null; ?>
                 <label for="client_charge" class="block text-sm font-medium text-slate-700 mb-1">Client Charge <span class="text-slate-400 font-normal text-xs">(per renewal)</span></label>
-                <input type="number" id="client_charge" name="client_charge" step="0.01" min="0"
-                       value="<?= $clientCharge !== null && $clientCharge !== '' ? number_format((float)$clientCharge, 2) : '' ?>"
-                       class="flex-1 w-full border border-slate-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent-500">
+                <div class="flex gap-2">
+                    <select name="client_charge_currency" class="border border-slate-300 rounded px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent-500 bg-white">
+                        <?php foreach (['GBP' => '£ GBP', 'USD' => '$ USD', 'EUR' => '€ EUR'] as $code => $label): ?>
+                            <option value="<?= $code ?>" <?= ($domain['client_charge_currency'] ?? 'GBP') === $code ? 'selected' : '' ?>><?= $label ?></option>
+                        <?php endforeach ?>
+                    </select>
+                    <input type="number" id="client_charge" name="client_charge" step="0.01" min="0"
+                           value="<?= $clientCharge !== null && $clientCharge !== '' ? number_format((float)$clientCharge, 2) : '' ?>"
+                           class="flex-1 border border-slate-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent-500">
+                </div>
             </div>
         </div>
 

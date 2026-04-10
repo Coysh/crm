@@ -102,6 +102,7 @@ class DomainController
             'renewal_years'      => max(1, (int)($post['renewal_years'] ?? 1)),
             'annual_cost'        => ($post['annual_cost'] ?? '') !== '' ? (float)$post['annual_cost'] : null,
             'client_charge'      => ($post['client_charge'] ?? '') !== '' ? (float)$post['client_charge'] : null,
+            'client_charge_currency' => in_array($post['client_charge_currency'] ?? '', ['GBP','USD','EUR']) ? $post['client_charge_currency'] : 'GBP',
             'currency'           => in_array($post['currency'] ?? '', ['GBP','USD','EUR']) ? $post['currency'] : 'GBP',
         ];
     }

@@ -291,14 +291,14 @@ class DomainListController
             $catId = $this->db->query("SELECT id FROM expense_categories ORDER BY id LIMIT 1")->fetchColumn();
         }
 
-        // Create the recurring cost
+        // Create the recurring cost using client charge (what the client pays), not my cost
         $stmt = $this->db->prepare("INSERT INTO recurring_costs (name, category_id, amount, billing_cycle, renewal_date, is_active, currency, created_at, updated_at) VALUES (?, ?, ?, 'annual', ?, 1, ?, datetime('now'), datetime('now'))");
         $stmt->execute([
             'Domain: ' . $domain['domain'],
             $catId,
-            (float)($domain['annual_cost'] ?? 0),
+            (float)($domain['client_charge'] ?? $domain['annual_cost'] ?? 0),
             $domain['renewal_date'] ?: null,
-            $domain['currency'] ?? 'GBP',
+            $domain['client_charge_currency'] ?? 'GBP',
         ]);
         $rcId = (int)$this->db->lastInsertId();
 
@@ -363,6 +363,7 @@ class DomainListController
             'renewal_years'      => max(1, (int)($post['renewal_years'] ?? 1)),
             'annual_cost'        => ($post['annual_cost'] ?? '') !== '' ? (float)$post['annual_cost'] : null,
             'client_charge'      => ($post['client_charge'] ?? '') !== '' ? (float)$post['client_charge'] : null,
+            'client_charge_currency' => in_array($post['client_charge_currency'] ?? '', ['GBP','USD','EUR']) ? $post['client_charge_currency'] : 'GBP',
             'currency'           => in_array($post['currency'] ?? '', ['GBP','USD','EUR']) ? $post['currency'] : 'GBP',
         ];
     }
