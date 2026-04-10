@@ -393,6 +393,9 @@ $router->get('/freeagent/client/(\d+)', function ($id) use ($db) {
 $router->post('/freeagent/invoices/(\d+)/client', function ($id) use ($db) {
     (new CoyshCRM\Controllers\FreeAgentController($db))->updateInvoiceClient((int)$id);
 });
+$router->post('/freeagent/invoices/(\d+)/status-override', function ($id) use ($db) {
+    (new CoyshCRM\Controllers\FreeAgentController($db))->updateInvoiceStatusOverride((int)$id);
+});
 $router->post('/freeagent/recurring/(\d+)/client', function ($id) use ($db) {
     (new CoyshCRM\Controllers\FreeAgentController($db))->updateRecurringClient((int)$id);
 });

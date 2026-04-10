@@ -187,6 +187,22 @@ class FreeAgentController
         exit;
     }
 
+    public function updateInvoiceStatusOverride(int $id): void
+    {
+        header('Content-Type: application/json');
+        $raw  = trim($_POST['status_override'] ?? '');
+        $note = trim($_POST['status_override_note'] ?? '');
+
+        $override = in_array($raw, ['paid', 'sent', 'overdue'], true) ? $raw : null;
+        $noteVal  = ($override !== null && $note !== '') ? $note : null;
+
+        $this->db->prepare("UPDATE freeagent_invoices SET status_override = ?, status_override_note = ? WHERE id = ?")
+            ->execute([$override, $noteVal, $id]);
+
+        echo json_encode(['ok' => true, 'status_override' => $override, 'status_override_note' => $noteVal]);
+        exit;
+    }
+
     public function updateRecurringClient(int $id): void
     {
         header('Content-Type: application/json');
