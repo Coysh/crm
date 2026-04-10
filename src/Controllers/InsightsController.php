@@ -602,7 +602,7 @@ class InsightsController
         if ($typeFilter === 'all' || $typeFilter === 'domain') {
             $parts[] = "
                 SELECT 'domain' AS type, d.domain AS name, d.renewal_date AS due_date,
-                       d.annual_cost AS amount, 'annual' AS cycle,
+                       COALESCE(d.client_charge, d.annual_cost) AS amount, 'annual' AS cycle,
                        c.id AS client_id, c.name AS client_name,
                        NULL AS shared_with,
                        '/clients/' || c.id AS detail_url
@@ -623,6 +623,7 @@ class InsightsController
                        '/expenses/recurring/' || rc.id || '/edit' AS detail_url
                 FROM recurring_costs rc
                 WHERE rc.renewal_date IS NOT NULL AND rc.is_active = 1
+                  AND rc.name NOT LIKE 'Domain: %'
                   AND rc.renewal_date BETWEEN ? AND ?
             ";
             $params[] = $cutoff;
