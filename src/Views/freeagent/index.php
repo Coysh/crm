@@ -117,7 +117,19 @@
                                 </select>
                             <?php endif ?>
                         </td>
-                        <td class="px-4 py-2.5 font-mono text-xs" data-value="<?= e($ri['reference'] ?? '') ?>"><?= freeagentLink($ri['freeagent_url'] ?? null, $ri['reference'] ?: '—') ?></td>
+                        <?php
+                            // FreeAgent's `reference` on a recurring template is a bank payment
+                            // reference code (e.g. "3346"), not a unique display identifier.
+                            // Use the numeric ID from the API URL instead, which is unique and
+                            // matches the link target. Show the bank ref as a tooltip if set.
+                            preg_match('|/(\d+)$|', $ri['freeagent_url'] ?? '', $_riIdM);
+                            $riDisplayRef = isset($_riIdM[1]) ? 'RI-' . $_riIdM[1] : ($ri['reference'] ?: '—');
+                            $riTitle      = ($ri['reference'] && $ri['reference'] !== $riDisplayRef)
+                                ? ' title="Bank ref: ' . e($ri['reference']) . '"' : '';
+                        ?>
+                        <td class="px-4 py-2.5 font-mono text-xs" data-value="<?= e($ri['reference'] ?? '') ?>">
+                            <span<?= $riTitle ?>><?= freeagentLink($ri['freeagent_url'] ?? null, $riDisplayRef) ?></span>
+                        </td>
                         <td class="px-4 py-2.5 text-slate-500" data-value="<?= e($ri['frequency']) ?>"><?= e($ri['frequency']) ?></td>
                         <td class="px-4 py-2.5 text-right tabular-nums font-medium" data-value="<?= (float)$ri['total_value'] ?>"><?= money($ri['total_value']) ?></td>
                         <td class="px-4 py-2.5 text-right tabular-nums text-slate-600" data-value="<?= round((float)$ri['monthly_value'], 4) ?>"><?= money($ri['monthly_value']) ?></td>
