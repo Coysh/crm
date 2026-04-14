@@ -95,6 +95,15 @@ function e(mixed $value): string
 }
 
 /**
+ * Render stored HTML safely, allowing only whitelisted tags.
+ */
+function safeHtml(mixed $value): string
+{
+    $allowed = '<p><br><strong><em><u><s><ul><ol><li><a><h2><h3><blockquote>';
+    return strip_tags((string)($value ?? ''), $allowed);
+}
+
+/**
  * Format a money value with £ prefix.
  */
 function money(mixed $value): string

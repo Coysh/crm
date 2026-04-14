@@ -196,6 +196,12 @@ $router->get('/projects/create', function () use ($db) {
 $router->post('/projects', function () use ($db) {
     (new CoyshCRM\Controllers\ProjectController($db))->store();
 });
+$router->post('/projects/quick-create', function () use ($db) {
+    (new CoyshCRM\Controllers\ProjectController($db))->quickCreate();
+});
+$router->post('/projects/(\d+)/status', function ($id) use ($db) {
+    (new CoyshCRM\Controllers\ProjectController($db))->updateStatus((int)$id);
+});
 $router->get('/projects/(\d+)/edit', function ($id) use ($db) {
     (new CoyshCRM\Controllers\ProjectController($db))->edit((int)$id);
 });

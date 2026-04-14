@@ -5,6 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title><?= e($pageTitle ?? 'Coysh Digital CRM') ?> — Coysh CRM</title>
     <link rel="stylesheet" href="/css/app.css">
+    <?php if (!empty($includeQuill)): ?>
+        <link rel="stylesheet" href="/css/quill.snow.css">
+    <?php endif ?>
 </head>
 <body class="h-full">
 
@@ -97,6 +100,14 @@
             </div>
         <?php endforeach ?>
 
+        <!-- Offline banner -->
+        <div id="offline-banner" class="border-b bg-amber-50 border-amber-200 text-amber-800 px-6 py-2 text-sm flex items-center gap-2" style="display:none">
+            <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M18.364 5.636a9 9 0 010 12.728M5.636 18.364a9 9 0 010-12.728M12 9v4m0 4h.01"/>
+            </svg>
+            You're offline &mdash; external integrations are unavailable
+        </div>
+
         <!-- Breadcrumbs -->
         <?php if (!empty($breadcrumbs)): ?>
             <nav class="px-6 py-3 border-b border-slate-200 bg-white text-sm text-slate-500 flex items-center gap-1.5">
@@ -116,6 +127,24 @@
         </main>
     </div>
 </div>
+
+<?php if (!empty($includeQuill)): ?>
+    <script src="/js/quill.min.js"></script>
+<?php endif ?>
+<style>body.offline [data-requires-online]{opacity:.4;pointer-events:none}</style>
+<script>
+(function(){
+    var banner=document.getElementById('offline-banner');
+    function update(){
+        var off=!navigator.onLine;
+        banner.style.display=off?'flex':'none';
+        document.body.classList.toggle('offline',off);
+    }
+    update();
+    window.addEventListener('online',update);
+    window.addEventListener('offline',update);
+})();
+</script>
 
 </body>
 </html>
