@@ -115,9 +115,15 @@
         </div>
 
         <div>
-            <label for="notes" class="block text-sm font-medium text-slate-700 mb-1">Notes</label>
-            <textarea id="notes" name="notes" rows="3"
-                      class="w-full border border-slate-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent-500"><?= e($project['notes'] ?? '') ?></textarea>
+            <label class="block text-sm font-medium text-slate-700 mb-1">Notes</label>
+            <input type="hidden" id="notes" name="notes" value="<?= e($project['notes'] ?? '') ?>">
+            <div id="notes-editor"></div>
+            <style>
+                #notes-editor .ql-toolbar{border-color:#cbd5e1;border-radius:.25rem .25rem 0 0;background:#f8fafc}
+                #notes-editor .ql-container{border-color:#cbd5e1;border-radius:0 0 .25rem .25rem;font-size:.875rem;min-height:100px}
+                #notes-editor .ql-editor{min-height:100px}
+                #notes-editor .ql-editor:focus{box-shadow:0 0 0 2px rgba(99,102,241,.3)}
+            </style>
         </div>
 
         <div class="flex items-center gap-3 pt-2">
@@ -129,3 +135,32 @@
 
     </form>
 </div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    var quill = new Quill('#notes-editor', {
+        theme: 'snow',
+        placeholder: 'Add notes...',
+        modules: {
+            toolbar: [
+                ['bold', 'italic', 'underline', 'strike'],
+                [{ 'header': [2, 3, false] }],
+                [{ 'list': 'ordered'}, { 'list': 'bullet' }],
+                ['link'],
+                ['clean']
+            ]
+        }
+    });
+
+    var notesInput = document.getElementById('notes');
+    var existing = notesInput.value;
+    if (existing) {
+        quill.root.innerHTML = existing;
+    }
+
+    document.querySelector('form').addEventListener('submit', function() {
+        var html = quill.root.innerHTML;
+        notesInput.value = (html === '<p><br></p>') ? '' : html;
+    });
+});
+</script>
