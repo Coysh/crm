@@ -57,6 +57,158 @@
         </dl>
     </div>
 
+    <!-- FreeAgent: Bills & Invoices -->
+    <div class="bg-white border border-slate-200 rounded-lg p-6 space-y-4">
+        <div class="flex items-start justify-between gap-4">
+            <div>
+                <h2 class="text-sm font-semibold text-slate-700">FreeAgent</h2>
+                <p class="text-xs text-slate-500 mt-0.5">
+                    Bills are matched via the linked recurring cost; invoices via reference text containing
+                    <span class="font-mono"><?= e($domain['domain']) ?></span>.
+                </p>
+            </div>
+            <?php
+            $stateLabels = [
+                'paid'    => ['Paid',    'bg-green-100 text-green-700'],
+                'overdue' => ['Overdue', 'bg-red-100 text-red-700'],
+                'unpaid'  => ['Unpaid',  'bg-amber-100 text-amber-700'],
+                'pending' => ['Pending', 'bg-amber-50 text-amber-600'],
+                'unknown' => ['Unknown', 'bg-slate-100 text-slate-600'],
+                'na'      => ['N/A',     'bg-slate-100 text-slate-500'],
+            ];
+            [$stateLabel, $stateCls] = $stateLabels[$paymentState ?? 'na'] ?? $stateLabels['na'];
+            ?>
+            <span class="inline-block px-2 py-0.5 rounded-full text-xs font-medium <?= $stateCls ?> shrink-0">
+                <?= $stateLabel ?>
+            </span>
+        </div>
+
+        <?php if (!empty($recurringCost)): ?>
+            <p class="text-xs text-slate-500">
+                Linked recurring cost:
+                <a href="/expenses/recurring/<?= (int)$recurringCost['id'] ?>/edit" class="text-accent-600 hover:underline">
+                    <?= e($recurringCost['name']) ?>
+                </a>
+                — <?= formatCurrency((float)$recurringCost['amount'], $recurringCost['currency'] ?? 'GBP') ?>
+                / <?= e($recurringCost['billing_cycle']) ?>
+                <?php if (!empty($recurringCost['renewal_date'])): ?>
+                    · next renewal <?= formatDate($recurringCost['renewal_date']) ?>
+                <?php endif ?>
+            </p>
+        <?php elseif ($domain['client_id']): ?>
+            <p class="text-xs text-slate-500">
+                No recurring cost linked yet.
+                <a href="/domains/<?= (int)$domain['id'] ?>/edit" class="text-accent-600 hover:underline">
+                    Create one
+                </a>
+                to track billing for this domain.
+            </p>
+        <?php endif ?>
+
+        <!-- Bills (supplier-side, what you pay the registrar) -->
+        <div>
+            <h3 class="text-xs font-semibold text-slate-600 uppercase tracking-wide mb-2">
+                Bills <span class="text-slate-400 font-normal">(what you pay)</span>
+            </h3>
+            <?php if (empty($bills)): ?>
+                <p class="text-xs text-slate-400">No matching FreeAgent bills.</p>
+            <?php else: ?>
+                <div class="overflow-x-auto -mx-2">
+                    <table class="w-full text-sm">
+                        <thead class="text-xs text-slate-500">
+                            <tr class="border-b border-slate-100">
+                                <th class="px-2 py-1.5 text-left font-medium">Date</th>
+                                <th class="px-2 py-1.5 text-left font-medium">Reference</th>
+                                <th class="px-2 py-1.5 text-left font-medium">Supplier</th>
+                                <th class="px-2 py-1.5 text-right font-medium">Amount</th>
+                                <th class="px-2 py-1.5 text-left font-medium">Status</th>
+                                <th class="px-2 py-1.5 text-left font-medium">Due</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-slate-100">
+                            <?php foreach ($bills as $b): ?>
+                                <?php
+                                $bs = strtolower((string)$b['status']);
+                                $bsCls = match (true) {
+                                    $bs === 'paid'                 => 'text-green-600',
+                                    $bs === 'overdue'              => 'text-red-600',
+                                    in_array($bs, ['open', 'sent']) => 'text-amber-600',
+                                    default                        => 'text-slate-500',
+                                };
+                                ?>
+                                <tr>
+                                    <td class="px-2 py-1.5 text-slate-500"><?= $b['dated_on'] ? formatDate($b['dated_on']) : '—' ?></td>
+                                    <td class="px-2 py-1.5 font-mono text-xs"><?= e($b['reference'] ?: '—') ?></td>
+                                    <td class="px-2 py-1.5 text-slate-600"><?= e($b['contact_name'] ?: '—') ?></td>
+                                    <td class="px-2 py-1.5 text-right tabular-nums"><?= formatCurrency((float)$b['total_value'], $b['currency'] ?? 'GBP') ?></td>
+                                    <td class="px-2 py-1.5 text-xs font-medium <?= $bsCls ?>"><?= e(ucfirst($b['status'] ?: '—')) ?></td>
+                                    <td class="px-2 py-1.5 text-slate-500 text-xs"><?= $b['due_date'] ? formatDate($b['due_date']) : '—' ?></td>
+                                </tr>
+                            <?php endforeach ?>
+                        </tbody>
+                    </table>
+                </div>
+            <?php endif ?>
+        </div>
+
+        <!-- Invoices (client-side, what the client pays you) -->
+        <div>
+            <h3 class="text-xs font-semibold text-slate-600 uppercase tracking-wide mb-2">
+                Invoices <span class="text-slate-400 font-normal">(what the client pays)</span>
+            </h3>
+            <?php if (empty($invoices)): ?>
+                <p class="text-xs text-slate-400">
+                    <?php if (!$domain['client_id']): ?>
+                        No client assigned to this domain.
+                    <?php else: ?>
+                        No FreeAgent invoices for <?= $client ? e($client['name']) : 'this client' ?> reference this domain.
+                    <?php endif ?>
+                </p>
+            <?php else: ?>
+                <div class="overflow-x-auto -mx-2">
+                    <table class="w-full text-sm">
+                        <thead class="text-xs text-slate-500">
+                            <tr class="border-b border-slate-100">
+                                <th class="px-2 py-1.5 text-left font-medium">Date</th>
+                                <th class="px-2 py-1.5 text-left font-medium">Reference</th>
+                                <th class="px-2 py-1.5 text-right font-medium">Amount</th>
+                                <th class="px-2 py-1.5 text-left font-medium">Status</th>
+                                <th class="px-2 py-1.5 text-left font-medium">Due</th>
+                                <th class="px-2 py-1.5 text-left font-medium">Paid</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-slate-100">
+                            <?php foreach ($invoices as $inv): ?>
+                                <?php
+                                $is = strtolower((string)($inv['status_override'] ?? $inv['status']));
+                                $isCls = match (true) {
+                                    $is === 'paid'                 => 'text-green-600',
+                                    $is === 'overdue'              => 'text-red-600',
+                                    in_array($is, ['sent', 'open']) => 'text-amber-600',
+                                    default                        => 'text-slate-500',
+                                };
+                                ?>
+                                <tr>
+                                    <td class="px-2 py-1.5 text-slate-500"><?= $inv['dated_on'] ? formatDate($inv['dated_on']) : '—' ?></td>
+                                    <td class="px-2 py-1.5 font-mono text-xs"><?= e($inv['reference'] ?: '—') ?></td>
+                                    <td class="px-2 py-1.5 text-right tabular-nums"><?= formatCurrency((float)$inv['total_value'], $inv['currency'] ?? 'GBP') ?></td>
+                                    <td class="px-2 py-1.5 text-xs font-medium <?= $isCls ?>">
+                                        <?= e(ucfirst((string)($inv['status_override'] ?? $inv['status'] ?: '—'))) ?>
+                                        <?php if (!empty($inv['status_override'])): ?>
+                                            <span class="text-slate-400 font-normal" title="Manual override">*</span>
+                                        <?php endif ?>
+                                    </td>
+                                    <td class="px-2 py-1.5 text-slate-500 text-xs"><?= $inv['due_date'] ? formatDate($inv['due_date']) : '—' ?></td>
+                                    <td class="px-2 py-1.5 text-slate-500 text-xs"><?= $inv['paid_on'] ? formatDate($inv['paid_on']) : '—' ?></td>
+                                </tr>
+                            <?php endforeach ?>
+                        </tbody>
+                    </table>
+                </div>
+            <?php endif ?>
+        </div>
+    </div>
+
     <!-- Cloudflare Zone Panel -->
     <?php if ($cfZone): ?>
     <div class="bg-white border border-slate-200 rounded-lg p-6 space-y-4">

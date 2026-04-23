@@ -170,12 +170,42 @@
                             </td>
                             <td class="px-4 py-2.5 text-center">
                                 <?php
-                                if (empty($domain['linked_recurring_cost_id']) || !$domain['client_id']) {
-                                    echo '<span class="text-slate-300 text-xs">N/A</span>';
-                                } elseif ($domain['linked_rc_renewal_date'] && $domain['linked_rc_renewal_date'] >= $today) {
-                                    echo '<span class="text-green-600 text-xs font-medium">Paid</span>';
-                                } else {
-                                    echo '<span class="text-red-600 text-xs font-medium">Overdue</span>';
+                                $state = $domain['payment_state'] ?? 'na';
+                                $bill  = $domain['latest_bill']    ?? null;
+                                $inv   = $domain['latest_invoice'] ?? null;
+
+                                $tipParts = [];
+                                if ($bill) {
+                                    $tipParts[] = 'Bill ' . ($bill['reference'] ?: '#' . $bill['id'])
+                                        . ' — ' . ucfirst((string)$bill['status'])
+                                        . ($bill['dated_on'] ? ' (' . $bill['dated_on'] . ')' : '');
+                                }
+                                if ($inv) {
+                                    $invStatus = $inv['status_override'] ?? $inv['status'];
+                                    $tipParts[] = 'Invoice ' . ($inv['reference'] ?: '#' . $inv['id'])
+                                        . ' — ' . ucfirst((string)$invStatus)
+                                        . ($inv['paid_on'] ? ' paid ' . $inv['paid_on'] : ($inv['dated_on'] ? ' (' . $inv['dated_on'] . ')' : ''));
+                                }
+                                $tip = $tipParts ? e(implode("\n", $tipParts)) : '';
+
+                                switch ($state) {
+                                    case 'paid':
+                                        echo '<span class="text-green-600 text-xs font-medium" title="' . $tip . '">Paid</span>';
+                                        break;
+                                    case 'overdue':
+                                        echo '<span class="text-red-600 text-xs font-medium" title="' . $tip . '">Overdue</span>';
+                                        break;
+                                    case 'unpaid':
+                                        echo '<span class="text-amber-600 text-xs font-medium" title="' . $tip . '">Unpaid</span>';
+                                        break;
+                                    case 'pending':
+                                        echo '<span class="text-amber-500 text-xs font-medium" title="Renewal date is in the future, but no FreeAgent bill or invoice confirms payment">Pending</span>';
+                                        break;
+                                    case 'unknown':
+                                        echo '<span class="text-slate-400 text-xs" title="No matching FreeAgent bill or invoice found">Unknown</span>';
+                                        break;
+                                    default:
+                                        echo '<span class="text-slate-300 text-xs">N/A</span>';
                                 }
                                 ?>
                             </td>
