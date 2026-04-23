@@ -130,6 +130,18 @@ $router->post('/domains/(\d+)/create-recurring-cost', function ($id) use ($db) {
 $router->post('/domains/bulk-archive', function () use ($db) {
     (new CoyshCRM\Controllers\DomainListController($db))->bulkArchive();
 });
+$router->post('/domains/(\d+)/invoices/link', function ($id) use ($db) {
+    (new CoyshCRM\Controllers\DomainListController($db))->linkInvoice((int)$id);
+});
+$router->post('/domains/(\d+)/invoices/(\d+)/unlink', function ($id, $invoiceId) use ($db) {
+    (new CoyshCRM\Controllers\DomainListController($db))->unlinkInvoice((int)$id, (int)$invoiceId);
+});
+$router->post('/domains/(\d+)/bills/link', function ($id) use ($db) {
+    (new CoyshCRM\Controllers\DomainListController($db))->linkBill((int)$id);
+});
+$router->post('/domains/(\d+)/bills/(\d+)/unlink', function ($id, $billId) use ($db) {
+    (new CoyshCRM\Controllers\DomainListController($db))->unlinkBill((int)$id, (int)$billId);
+});
 
 // ── Domains (sub-resource of client) ──────────────────────────────────────
 $router->get('/clients/(\d+)/domains/create', function ($clientId) use ($db) {
