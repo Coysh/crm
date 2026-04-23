@@ -192,6 +192,14 @@ class DomainListController
         }
         [$bills, $invoices] = $this->fetchFreeAgentForDomain($domain, $recurringCost);
 
+        // Candidate records for the "Link existing invoice / bill" pickers —
+        // everything not already linked, scoped to the client where that makes
+        // sense.
+        $linkedInvoiceIds = array_map('intval', array_column($invoices, 'id'));
+        $linkedBillIds    = array_map('intval', array_column($bills, 'id'));
+        $candidateInvoices = $this->fetchCandidateInvoices((int)($domain['client_id'] ?? 0), $linkedInvoiceIds);
+        $candidateBills    = $this->fetchCandidateBills($linkedBillIds);
+
         // Reuse the same paid-state logic as the list view so both pages agree.
         $today = date('Y-m-d');
         $domainWithRc = $domain;
@@ -206,51 +214,228 @@ class DomainListController
         $breadcrumbs = [['Domains', '/domains'], [$domain['domain'], null]];
         render(
             'domains.show',
-            compact('domain', 'client', 'cfZone', 'recurringCost', 'bills', 'invoices', 'paymentState', 'breadcrumbs'),
+            compact(
+                'domain', 'client', 'cfZone', 'recurringCost',
+                'bills', 'invoices', 'candidateInvoices', 'candidateBills',
+                'paymentState', 'breadcrumbs'
+            ),
             $domain['domain']
         );
     }
 
+    public function linkInvoice(int $domainId): void
+    {
+        $invoiceId = (int)($_POST['freeagent_invoice_id'] ?? 0);
+        if ($invoiceId > 0) {
+            try {
+                $this->db->prepare("
+                    INSERT OR IGNORE INTO domain_invoice_links (domain_id, freeagent_invoice_id)
+                    VALUES (?, ?)
+                ")->execute([$domainId, $invoiceId]);
+                flash('success', 'Invoice linked.');
+            } catch (\Throwable $e) {
+                flash('error', 'Could not link invoice: ' . $e->getMessage());
+            }
+        }
+        redirect("/domains/$domainId");
+    }
+
+    public function unlinkInvoice(int $domainId, int $invoiceId): void
+    {
+        try {
+            $this->db->prepare("
+                DELETE FROM domain_invoice_links
+                WHERE domain_id = ? AND freeagent_invoice_id = ?
+            ")->execute([$domainId, $invoiceId]);
+            flash('success', 'Invoice unlinked.');
+        } catch (\Throwable $e) {
+            flash('error', 'Could not unlink invoice: ' . $e->getMessage());
+        }
+        redirect("/domains/$domainId");
+    }
+
+    public function linkBill(int $domainId): void
+    {
+        $billId = (int)($_POST['freeagent_bill_id'] ?? 0);
+        if ($billId > 0) {
+            try {
+                $this->db->prepare("
+                    INSERT OR IGNORE INTO domain_bill_links (domain_id, freeagent_bill_id)
+                    VALUES (?, ?)
+                ")->execute([$domainId, $billId]);
+                flash('success', 'Bill linked.');
+            } catch (\Throwable $e) {
+                flash('error', 'Could not link bill: ' . $e->getMessage());
+            }
+        }
+        redirect("/domains/$domainId");
+    }
+
+    public function unlinkBill(int $domainId, int $billId): void
+    {
+        try {
+            $this->db->prepare("
+                DELETE FROM domain_bill_links
+                WHERE domain_id = ? AND freeagent_bill_id = ?
+            ")->execute([$domainId, $billId]);
+            flash('success', 'Bill unlinked.');
+        } catch (\Throwable $e) {
+            flash('error', 'Could not unlink bill: ' . $e->getMessage());
+        }
+        redirect("/domains/$domainId");
+    }
+
     /**
-     * Returns [bills, invoices] for a domain. Bills are matched via
-     * recurring_cost_id; invoices via reference LIKE '%domain%' for the
-     * domain's client (heuristic — FreeAgent doesn't model domain-level
-     * line items).
+     * Returns [bills, invoices] for a domain. Records come from two sources:
+     *   - manual links in domain_bill_links / domain_invoice_links (tagged
+     *     link_type = 'manual')
+     *   - auto matches: bills by recurring_cost_id, invoices by reference
+     *     LIKE '%domain%' for the domain's client (tagged 'auto')
      *
      * @return array{0: array<int, array<string,mixed>>, 1: array<int, array<string,mixed>>}
      */
     private function fetchFreeAgentForDomain(array $domain, ?array $recurringCost): array
     {
-        $bills    = [];
-        $invoices = [];
+        $domainId = (int)($domain['id'] ?? 0);
+
+        // ── Bills ──────────────────────────────────────────────────────────
+        $bills   = [];
+        $seenBillIds = [];
+
+        // Manual links first so "manual" label sticks even if the bill would
+        // also match the auto query.
+        try {
+            $stmt = $this->db->prepare("
+                SELECT fb.*, 'manual' AS link_type, dbl.id AS link_id
+                FROM domain_bill_links dbl
+                JOIN freeagent_bills fb ON fb.id = dbl.freeagent_bill_id
+                WHERE dbl.domain_id = ?
+                ORDER BY fb.dated_on DESC, fb.id DESC
+            ");
+            $stmt->execute([$domainId]);
+            foreach ($stmt->fetchAll() as $row) {
+                $bills[] = $row;
+                $seenBillIds[(int)$row['id']] = true;
+            }
+        } catch (\Throwable) {}
 
         if (!empty($recurringCost['id'])) {
             try {
                 $stmt = $this->db->prepare("
-                    SELECT * FROM freeagent_bills
+                    SELECT *, 'auto' AS link_type, NULL AS link_id
+                    FROM freeagent_bills
                     WHERE recurring_cost_id = ?
                     ORDER BY dated_on DESC, id DESC
                 ");
                 $stmt->execute([(int)$recurringCost['id']]);
-                $bills = $stmt->fetchAll();
+                foreach ($stmt->fetchAll() as $row) {
+                    if (!isset($seenBillIds[(int)$row['id']])) {
+                        $bills[] = $row;
+                    }
+                }
             } catch (\Throwable) {}
         }
+
+        // ── Invoices ───────────────────────────────────────────────────────
+        $invoices       = [];
+        $seenInvoiceIds = [];
+
+        try {
+            $stmt = $this->db->prepare("
+                SELECT fi.*, 'manual' AS link_type, dil.id AS link_id
+                FROM domain_invoice_links dil
+                JOIN freeagent_invoices fi ON fi.id = dil.freeagent_invoice_id
+                WHERE dil.domain_id = ?
+                ORDER BY fi.dated_on DESC, fi.id DESC
+            ");
+            $stmt->execute([$domainId]);
+            foreach ($stmt->fetchAll() as $row) {
+                $invoices[] = $row;
+                $seenInvoiceIds[(int)$row['id']] = true;
+            }
+        } catch (\Throwable) {}
 
         if (!empty($domain['client_id']) && !empty($domain['domain'])) {
             try {
                 $stmt = $this->db->prepare("
-                    SELECT * FROM freeagent_invoices
+                    SELECT *, 'auto' AS link_type, NULL AS link_id
+                    FROM freeagent_invoices
                     WHERE client_id = ?
                       AND reference IS NOT NULL
                       AND LOWER(reference) LIKE LOWER(?)
                     ORDER BY dated_on DESC, id DESC
                 ");
                 $stmt->execute([(int)$domain['client_id'], '%' . $domain['domain'] . '%']);
-                $invoices = $stmt->fetchAll();
+                foreach ($stmt->fetchAll() as $row) {
+                    if (!isset($seenInvoiceIds[(int)$row['id']])) {
+                        $invoices[] = $row;
+                    }
+                }
             } catch (\Throwable) {}
         }
 
+        // Keep each list ordered by dated_on DESC across both sources
+        $byDateDesc = fn ($a, $b) => strcmp((string)($b['dated_on'] ?? ''), (string)($a['dated_on'] ?? ''));
+        usort($bills,    $byDateDesc);
+        usort($invoices, $byDateDesc);
+
         return [$bills, $invoices];
+    }
+
+    /**
+     * FreeAgent invoices that could be manually linked to this domain.
+     * Scoped to the domain's client (if any) and to records not already linked.
+     *
+     * @param int[] $excludeIds
+     * @return array<int, array<string,mixed>>
+     */
+    private function fetchCandidateInvoices(int $clientId, array $excludeIds): array
+    {
+        try {
+            $sql = "SELECT id, reference, dated_on, total_value, currency, status, status_override, paid_on
+                    FROM freeagent_invoices WHERE 1=1";
+            $params = [];
+            if ($clientId > 0) { $sql .= " AND client_id = ?"; $params[] = $clientId; }
+            if ($excludeIds)   {
+                $placeholders = implode(',', array_fill(0, count($excludeIds), '?'));
+                $sql    .= " AND id NOT IN ($placeholders)";
+                $params  = array_merge($params, $excludeIds);
+            }
+            $sql .= " ORDER BY dated_on DESC, id DESC LIMIT 200";
+            $stmt = $this->db->prepare($sql);
+            $stmt->execute($params);
+            return $stmt->fetchAll();
+        } catch (\Throwable) {
+            return [];
+        }
+    }
+
+    /**
+     * FreeAgent bills that could be manually linked to this domain. Not
+     * filtered by client (bills come from suppliers, so the client link isn't
+     * meaningful) — limited to recent records to keep the dropdown manageable.
+     *
+     * @param int[] $excludeIds
+     * @return array<int, array<string,mixed>>
+     */
+    private function fetchCandidateBills(array $excludeIds): array
+    {
+        try {
+            $sql = "SELECT id, reference, dated_on, total_value, currency, status, contact_name
+                    FROM freeagent_bills WHERE 1=1";
+            $params = [];
+            if ($excludeIds) {
+                $placeholders = implode(',', array_fill(0, count($excludeIds), '?'));
+                $sql    .= " AND id NOT IN ($placeholders)";
+                $params  = $excludeIds;
+            }
+            $sql .= " ORDER BY dated_on DESC, id DESC LIMIT 200";
+            $stmt = $this->db->prepare($sql);
+            $stmt->execute($params);
+            return $stmt->fetchAll();
+        } catch (\Throwable) {
+            return [];
+        }
     }
 
     public function edit(int $id): void
@@ -478,6 +663,8 @@ class DomainListController
     {
         if (empty($domains)) return $domains;
 
+        $domainIds = array_map('intval', array_column($domains, 'id'));
+
         // Bills keyed by recurring_cost_id (latest dated_on wins)
         $rcIds = array_values(array_unique(array_filter(array_column($domains, 'linked_recurring_cost_id'))));
         $billsByRcId = [];
@@ -497,20 +684,23 @@ class DomainListController
             } catch (\Throwable) {}
         }
 
-        // Invoices: heuristic match by client_id + reference containing the
-        // domain name. Done per-domain because the LIKE pattern varies. There
-        // are typically not many domains, so N+1 here is fine for a CRM that
-        // sits behind a VPN.
+        // Manually-linked bills / invoices keyed by domain_id (latest wins).
+        // These take precedence over auto matches so a user-curated link
+        // always drives the payment state.
+        $manualBillByDomain    = $this->latestManualLinksByDomain($domainIds, 'bill');
+        $manualInvoiceByDomain = $this->latestManualLinksByDomain($domainIds, 'invoice');
+
         foreach ($domains as &$d) {
-            $bill    = null;
-            $invoice = null;
-            $rcId    = (int)($d['linked_recurring_cost_id'] ?? 0);
+            $did  = (int)($d['id'] ?? 0);
+            $rcId = (int)($d['linked_recurring_cost_id'] ?? 0);
 
-            if ($rcId && isset($billsByRcId[$rcId])) {
-                $bill = $billsByRcId[$rcId];
-            }
+            $bill    = $manualBillByDomain[$did]
+                     ?? ($rcId ? ($billsByRcId[$rcId] ?? null) : null);
+            $invoice = $manualInvoiceByDomain[$did] ?? null;
 
-            if (!empty($d['client_id']) && !empty($d['domain'])) {
+            // Fall back to reference-based auto match for invoices only if no
+            // manual link exists.
+            if (!$invoice && !empty($d['client_id']) && !empty($d['domain'])) {
                 try {
                     $stmt = $this->db->prepare("
                         SELECT * FROM freeagent_invoices
@@ -532,6 +722,43 @@ class DomainListController
         unset($d);
 
         return $domains;
+    }
+
+    /**
+     * Returns [domain_id => latest linked record] for the given domain IDs and
+     * link type ('bill' or 'invoice'). "Latest" is by the underlying FA
+     * record's dated_on.
+     *
+     * @param int[] $domainIds
+     * @return array<int, array<string,mixed>>
+     */
+    private function latestManualLinksByDomain(array $domainIds, string $type): array
+    {
+        if (!$domainIds) return [];
+
+        [$linkTable, $fkColumn, $targetTable] = $type === 'bill'
+            ? ['domain_bill_links',    'freeagent_bill_id',    'freeagent_bills']
+            : ['domain_invoice_links', 'freeagent_invoice_id', 'freeagent_invoices'];
+
+        try {
+            $placeholders = implode(',', array_fill(0, count($domainIds), '?'));
+            $stmt = $this->db->prepare("
+                SELECT link.domain_id, fa.*
+                FROM $linkTable link
+                JOIN $targetTable fa ON fa.id = link.$fkColumn
+                WHERE link.domain_id IN ($placeholders)
+                ORDER BY fa.dated_on DESC, fa.id DESC
+            ");
+            $stmt->execute($domainIds);
+            $out = [];
+            foreach ($stmt->fetchAll() as $row) {
+                $did = (int)$row['domain_id'];
+                if (!isset($out[$did])) $out[$did] = $row;
+            }
+            return $out;
+        } catch (\Throwable) {
+            return [];
+        }
     }
 
     private function derivePaymentState(array $domain, ?array $bill, ?array $invoice, string $today): string
