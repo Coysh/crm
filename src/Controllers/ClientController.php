@@ -502,9 +502,11 @@ class ClientController
             'client_sites'                    => 'client_id',
             'projects'                        => 'client_id',
             'expenses'                        => 'client_id',
+            'client_attachments'              => 'client_id',
             'freeagent_contacts'              => 'client_id',
             'freeagent_invoices'              => 'client_id',
             'freeagent_recurring_invoices'    => 'client_id',
+            'freeagent_bank_transactions'     => 'client_id',
         ];
 
         try {
@@ -514,6 +516,20 @@ class ClientController
                 $this->db->prepare("UPDATE $table SET $col = ? WHERE $col = ?")
                     ->execute([$targetId, $id]);
             }
+
+            // Recurring-cost client links: move to the target, but first drop
+            // any source rows that would duplicate an existing target link.
+            // recurring_cost_clients has no unique constraint, and a duplicate
+            // row would double-count the cost in the target client's P&L.
+            $this->db->prepare("
+                DELETE FROM recurring_cost_clients
+                WHERE client_id = ?
+                  AND recurring_cost_id IN (
+                      SELECT recurring_cost_id FROM recurring_cost_clients WHERE client_id = ?
+                  )
+            ")->execute([$id, $targetId]);
+            $this->db->prepare("UPDATE recurring_cost_clients SET client_id = ? WHERE client_id = ?")
+                ->execute([$targetId, $id]);
 
             $this->db->prepare("DELETE FROM clients WHERE id = ?")->execute([$id]);
 

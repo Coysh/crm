@@ -13,8 +13,11 @@
 
 <div class="flex h-full min-h-screen">
 
+    <!-- Backdrop (mobile drawer) -->
+    <div id="nav-backdrop" class="nav-backdrop" aria-hidden="true"></div>
+
     <!-- Sidebar -->
-    <nav class="w-56 shrink-0 bg-slate-900 flex flex-col">
+    <nav id="sidebar" class="sidebar w-56 shrink-0 bg-slate-900 flex flex-col">
         <div class="px-5 py-5 border-b border-slate-700">
             <span class="text-white font-semibold text-sm tracking-wide">Coysh Digital</span>
             <span class="block text-slate-400 text-xs mt-0.5">CRM</span>
@@ -92,6 +95,16 @@
     <!-- Main content -->
     <div class="flex-1 flex flex-col min-w-0 overflow-auto">
 
+        <!-- Mobile top bar (hamburger + title) — hidden on lg+ via CSS -->
+        <header class="mobile-header">
+            <button id="nav-toggle" type="button" aria-label="Open menu" aria-controls="sidebar" aria-expanded="false">
+                <svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 12h16M4 18h16"/>
+                </svg>
+            </button>
+            <span>Coysh CRM</span>
+        </header>
+
         <!-- Flash messages -->
         <?php foreach (getFlash() as $flash): ?>
             <?php $fc = $flash['type'] === 'success' ? 'bg-green-50 border-green-200 text-green-800' : 'bg-red-50 border-red-200 text-red-800' ?>
@@ -131,18 +144,108 @@
 <?php if (!empty($includeQuill)): ?>
     <script src="/js/quill.min.js"></script>
 <?php endif ?>
-<style>body.offline [data-requires-online]{opacity:.4;pointer-events:none}</style>
+<style>
+body.offline [data-requires-online]{opacity:.4;pointer-events:none}
+
+/* Mobile top bar — hidden on lg+ (>=1024px) */
+.mobile-header{display:none}
+.nav-backdrop{display:none}
+
+@media (max-width:1023px){
+    .mobile-header{
+        display:flex;align-items:center;gap:.75rem;
+        background:#0f172a;color:#fff;
+        padding:.625rem 1rem;
+        position:sticky;top:0;z-index:30;
+        border-bottom:1px solid #334155;
+    }
+    .mobile-header button{
+        background:transparent;border:0;color:#fff;
+        padding:.25rem;margin:-.25rem;cursor:pointer;line-height:0;
+    }
+    .mobile-header button:focus{outline:2px solid #6366f1;outline-offset:2px;border-radius:.25rem}
+    .mobile-header span{font-size:.875rem;font-weight:600;letter-spacing:.025em}
+
+    /* Sidebar becomes an off-canvas drawer */
+    .sidebar{
+        position:fixed;top:0;bottom:0;left:0;
+        z-index:50;
+        transform:translateX(-100%);
+        transition:transform .2s ease-in-out;
+        box-shadow:0 10px 25px -5px rgba(0,0,0,.4);
+    }
+    .sidebar.open{transform:translateX(0)}
+
+    .nav-backdrop{
+        display:block;position:fixed;inset:0;
+        background:rgba(0,0,0,.5);
+        z-index:40;
+        opacity:0;pointer-events:none;
+        transition:opacity .2s ease-in-out;
+    }
+    .nav-backdrop.open{opacity:1;pointer-events:auto}
+
+    /* Lock body scroll while drawer is open */
+    body.nav-open{overflow:hidden}
+
+    /* Tighten generous desktop padding on phones/tablets */
+    main{padding:1rem !important}
+}
+
+/* Narrow-phone grid collapse — paired form fields and detail grids
+   become single column under 640px. Above 640px Tailwind's responsive
+   classes take over, so this only fires on true phone widths. */
+@media (max-width:639px){
+    form .grid.grid-cols-2,
+    form .grid.grid-cols-3,
+    dl.grid.grid-cols-2,
+    dl.grid.grid-cols-3{
+        grid-template-columns:1fr !important;
+    }
+    /* Page-header rows that stack a title + action button — let them wrap */
+    main > .space-y-6 > .flex.items-center.justify-between,
+    main > .space-y-4 > .flex.items-center.justify-between{
+        flex-wrap:wrap;
+        gap:.75rem;
+    }
+}
+</style>
 <script>
 (function(){
     var banner=document.getElementById('offline-banner');
     function update(){
         var off=!navigator.onLine;
-        banner.style.display=off?'flex':'none';
+        if(banner)banner.style.display=off?'flex':'none';
         document.body.classList.toggle('offline',off);
     }
     update();
     window.addEventListener('online',update);
     window.addEventListener('offline',update);
+
+    // Mobile sidebar drawer
+    var btn=document.getElementById('nav-toggle');
+    var sidebar=document.getElementById('sidebar');
+    var backdrop=document.getElementById('nav-backdrop');
+    if(btn&&sidebar&&backdrop){
+        function setOpen(open){
+            sidebar.classList.toggle('open',open);
+            backdrop.classList.toggle('open',open);
+            document.body.classList.toggle('nav-open',open);
+            btn.setAttribute('aria-expanded',open?'true':'false');
+        }
+        btn.addEventListener('click',function(){
+            setOpen(!sidebar.classList.contains('open'));
+        });
+        backdrop.addEventListener('click',function(){setOpen(false)});
+        // Close drawer when a nav link is tapped (mobile)
+        sidebar.addEventListener('click',function(e){
+            if(e.target.closest('a'))setOpen(false);
+        });
+        // Close on Escape
+        document.addEventListener('keydown',function(e){
+            if(e.key==='Escape'&&sidebar.classList.contains('open'))setOpen(false);
+        });
+    }
 })();
 </script>
 
