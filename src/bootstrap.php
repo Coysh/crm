@@ -15,8 +15,43 @@ ini_set('display_errors', $isProduction ? '0' : '1');
 error_reporting(E_ALL);
 ini_set('max_execution_time', '120'); // Allow longer execution for API syncs
 
-// Session for flash messages
+// Detect HTTPS (directly or via reverse proxy) for cookie/header decisions.
+$isHttps = (($_SERVER['HTTPS'] ?? '') === 'on')
+    || (($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https')
+    || (($_SERVER['SERVER_PORT'] ?? '') === '443')
+    || $isProduction;
+
+// Baseline security headers (skip on CLI).
+if (PHP_SAPI !== 'cli' && !headers_sent()) {
+    header('X-Frame-Options: DENY');
+    header('X-Content-Type-Options: nosniff');
+    header('Referrer-Policy: same-origin');
+    header('X-Permitted-Cross-Domain-Policies: none');
+    header(
+        "Content-Security-Policy: default-src 'self'; "
+        . "img-src 'self' data:; "
+        . "style-src 'self' 'unsafe-inline'; "
+        . "script-src 'self' 'unsafe-inline'; "
+        . "object-src 'none'; base-uri 'self'; "
+        . "frame-ancestors 'none'; form-action 'self'"
+    );
+    if ($isHttps) {
+        header('Strict-Transport-Security: max-age=31536000; includeSubDomains');
+    }
+}
+
+// Hardened, authenticated sessions.
+define('SESSION_IDLE_TIMEOUT', 7200);      // 2 hours
+define('SESSION_ABSOLUTE_TIMEOUT', 43200); // 12 hours
 if (session_status() === PHP_SESSION_NONE) {
+    ini_set('session.use_strict_mode', '1');
+    session_set_cookie_params([
+        'lifetime' => 0,
+        'path'     => '/',
+        'httponly' => true,
+        'secure'   => $isHttps,
+        'samesite' => 'Lax',
+    ]);
     session_start();
 }
 
@@ -39,7 +74,7 @@ try {
  * @param array  $data   Variables to extract into the view
  * @param string $layout Layout file (relative to Views/layouts/)
  */
-function render(string $view, array $data = [], string $title = ''): void
+function render(string $view, array $data = [], string $title = '', string $layout = 'layouts/main'): void
 {
     $viewFile = VIEW_PATH . '/' . str_replace('.', '/', $view) . '.php';
 
@@ -56,7 +91,7 @@ function render(string $view, array $data = [], string $title = ''): void
 
     $pageTitle = $title ?: ucfirst(str_replace(['.', '_', '/'], [' ', ' ', ' → '], $view));
 
-    include VIEW_PATH . '/layouts/main.php';
+    include VIEW_PATH . '/' . str_replace('.', '/', $layout) . '.php';
 }
 
 /**
@@ -92,6 +127,91 @@ function getFlash(): array
 function e(mixed $value): string
 {
     return htmlspecialchars((string)($value ?? ''), ENT_QUOTES, 'UTF-8');
+}
+
+/**
+ * Is there a fully authenticated user this request? Enforces idle and absolute
+ * session timeouts, clearing the session if either is exceeded.
+ */
+function isAuthenticated(): bool
+{
+    if (empty($_SESSION['user_id'])) {
+        return false;
+    }
+    $now = time();
+    if (isset($_SESSION['login_time']) && $now - $_SESSION['login_time'] > SESSION_ABSOLUTE_TIMEOUT) {
+        logoutSession();
+        return false;
+    }
+    if (isset($_SESSION['last_activity']) && $now - $_SESSION['last_activity'] > SESSION_IDLE_TIMEOUT) {
+        logoutSession();
+        return false;
+    }
+    $_SESSION['last_activity'] = $now;
+    return true;
+}
+
+/**
+ * The signed-in user row, or null. Cached per request.
+ */
+function currentUser(): ?array
+{
+    static $user = null;
+    static $loaded = false;
+    if ($loaded) {
+        return $user;
+    }
+    $loaded = true;
+    if (empty($_SESSION['user_id'])) {
+        return $user = null;
+    }
+    global $db;
+    $stmt = $db->prepare("SELECT * FROM users WHERE id = ?");
+    $stmt->execute([$_SESSION['user_id']]);
+    return $user = ($stmt->fetch() ?: null);
+}
+
+/**
+ * Clear all authentication/session state.
+ */
+function logoutSession(): void
+{
+    $_SESSION = [];
+    if (ini_get('session.use_cookies')) {
+        $p = session_get_cookie_params();
+        setcookie(session_name(), '', time() - 42000, $p['path'], $p['domain'], $p['secure'], $p['httponly']);
+    }
+    if (session_status() === PHP_SESSION_ACTIVE) {
+        session_destroy();
+    }
+}
+
+/**
+ * Current CSRF token (created on first use).
+ */
+function csrfToken(): string
+{
+    if (empty($_SESSION['_csrf'])) {
+        $_SESSION['_csrf'] = bin2hex(random_bytes(32));
+    }
+    return $_SESSION['_csrf'];
+}
+
+/**
+ * Hidden CSRF input for inclusion in forms.
+ */
+function csrfField(): string
+{
+    return '<input type="hidden" name="_token" value="' . e(csrfToken()) . '">';
+}
+
+/**
+ * Validate the CSRF token from a submitted form.
+ */
+function csrfCheck(): bool
+{
+    $sent = $_POST['_token'] ?? ($_SERVER['HTTP_X_CSRF_TOKEN'] ?? '');
+    return !empty($_SESSION['_csrf']) && is_string($sent) && hash_equals($_SESSION['_csrf'], $sent);
 }
 
 /**

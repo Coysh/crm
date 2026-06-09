@@ -167,13 +167,14 @@ class SettingsController
             return;
         }
 
+        $encryptedSecret = \CoyshCRM\Services\Secrets::encrypt($clientSecret);
         $exists = $this->db->query("SELECT id FROM freeagent_config WHERE id = 1")->fetch();
         if ($exists) {
             $this->db->prepare("UPDATE freeagent_config SET client_id = ?, client_secret = ?, use_sandbox = ? WHERE id = 1")
-                ->execute([$clientId, $clientSecret, $useSandbox]);
+                ->execute([$clientId, $encryptedSecret, $useSandbox]);
         } else {
             $this->db->prepare("INSERT INTO freeagent_config (id, client_id, client_secret, use_sandbox) VALUES (1, ?, ?, ?)")
-                ->execute([$clientId, $clientSecret, $useSandbox]);
+                ->execute([$clientId, $encryptedSecret, $useSandbox]);
         }
 
         flash('success', 'FreeAgent credentials saved.');

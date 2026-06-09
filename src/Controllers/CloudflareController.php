@@ -6,6 +6,7 @@ namespace CoyshCRM\Controllers;
 
 use CoyshCRM\Services\CloudflareService;
 use CoyshCRM\Services\CloudflareSync;
+use CoyshCRM\Services\Secrets;
 use PDO;
 
 class CloudflareController
@@ -55,11 +56,12 @@ class CloudflareController
         }
 
         try {
+            $encrypted = Secrets::encrypt($token);
             $existing = $this->db->query("SELECT id FROM cloudflare_config WHERE id = 1")->fetch();
             if ($existing) {
-                $this->db->prepare("UPDATE cloudflare_config SET api_token = ? WHERE id = 1")->execute([$token]);
+                $this->db->prepare("UPDATE cloudflare_config SET api_token = ? WHERE id = 1")->execute([$encrypted]);
             } else {
-                $this->db->prepare("INSERT INTO cloudflare_config (id, api_token) VALUES (1, ?)")->execute([$token]);
+                $this->db->prepare("INSERT INTO cloudflare_config (id, api_token) VALUES (1, ?)")->execute([$encrypted]);
             }
             flash('success', 'Cloudflare API token saved.');
         } catch (\Throwable $e) {

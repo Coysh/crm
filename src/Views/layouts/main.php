@@ -90,6 +90,18 @@
                 <?= $ploiConnected ? 'Ploi connected' : 'Ploi not connected' ?>
             </a>
         </div>
+
+        <!-- Signed-in user -->
+        <?php $authUser = function_exists('currentUser') ? currentUser() : null; ?>
+        <?php if ($authUser): ?>
+            <div class="px-4 py-3 border-t border-slate-700 flex items-center justify-between gap-2">
+                <span class="text-xs text-slate-400 truncate"><?= e($authUser['username']) ?></span>
+                <form method="POST" action="/logout" class="shrink-0">
+                    <?= csrfField() ?>
+                    <button type="submit" class="text-xs text-slate-400 hover:text-white">Sign out</button>
+                </form>
+            </div>
+        <?php endif ?>
     </nav>
 
     <!-- Main content -->

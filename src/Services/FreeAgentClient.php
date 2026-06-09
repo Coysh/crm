@@ -30,7 +30,8 @@ class FreeAgentClient
     public function getConfig(): ?array
     {
         if ($this->config !== null) return $this->config;
-        $this->config = $this->db->query("SELECT * FROM freeagent_config WHERE id = 1")->fetch() ?: null;
+        $row = $this->db->query("SELECT * FROM freeagent_config WHERE id = 1")->fetch() ?: null;
+        $this->config = Secrets::decryptRow($row, ['access_token', 'refresh_token', 'client_secret']);
         return $this->config;
     }
 
@@ -122,8 +123,8 @@ class FreeAgentClient
                 token_expires_at  = ?
             WHERE id = 1
         ")->execute([
-            $data['access_token'],
-            $data['refresh_token'] ?? null,
+            Secrets::encrypt($data['access_token']),
+            isset($data['refresh_token']) ? Secrets::encrypt($data['refresh_token']) : null,
             $expiresAt,
         ]);
 
