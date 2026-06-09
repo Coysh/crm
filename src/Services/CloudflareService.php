@@ -17,7 +17,7 @@ class CloudflareService
     {
         try {
             $row = $this->db->query("SELECT * FROM cloudflare_config WHERE id = 1")->fetch();
-            return $row ?: null;
+            return Secrets::decryptRow($row ?: null, ['api_token']);
         } catch (\Throwable) {
             return null;
         }

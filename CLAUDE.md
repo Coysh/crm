@@ -35,7 +35,15 @@ No test suite currently. There are no linting commands configured.
 - **Backend:** PHP 8.2+, no framework — uses a slim router (e.g. Bramus/Router)
 - **Database:** SQLite, stored at `data/crm.db` (gitignored)
 - **Frontend:** Tailwind CSS + vanilla JS (`fetch()` for AJAX, no frameworks)
-- **Auth:** None — sits behind a VPN/local network
+- **Auth:** Single-user login with password + mandatory TOTP 2FA. Enforced by a
+  global `before` guard in `src/routes.php`; flow lives in `AuthController` and
+  `src/Views/auth/`. Sessions use HttpOnly/SameSite (Secure under HTTPS) cookies
+  with idle/absolute timeouts. First run redirects to `/setup`.
+- **Secrets at rest:** API tokens (FreeAgent/Ploi/Cloudflare) and TOTP seeds are
+  encrypted via `Services\Secrets` (libsodium). Key from `APP_KEY` env, falling back
+  to `data/app.key` (auto-created, gitignored). Encrypted values are prefixed
+  `enc:v1:`; decrypt tolerates legacy plaintext. Run `scripts/encrypt-existing-secrets.php`
+  once to migrate existing plaintext tokens.
 - **Accounting:** FreeAgent API (OAuth2) — optional, final phase
 
 ## Architecture

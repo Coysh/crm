@@ -7,6 +7,52 @@ use Bramus\Router\Router;
 /** @var Router $router */
 /** @var PDO $db */
 
+// ── Authentication guard ────────────────────────────────────────────────────
+// Runs before every route. Allows the auth endpoints and static assets through;
+// everything else requires an authenticated session.
+$router->before('GET|POST', '/.*', function () {
+    $path = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?: '/';
+
+    $public = ['/login', '/login/2fa', '/logout', '/setup'];
+    $isStatic = (bool)preg_match('#^/(css|js|img|favicon|robots)#', $path)
+        || (bool)preg_match('#\.(css|js|png|jpe?g|gif|svg|ico|woff2?|map)$#i', $path);
+
+    if (in_array($path, $public, true) || $isStatic) {
+        return;
+    }
+
+    if (!isAuthenticated()) {
+        // Remember intent only for safe GET navigations.
+        if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'GET') {
+            $_SESSION['intended_url'] = $path;
+        }
+        redirect('/login');
+    }
+});
+
+// ── Auth routes ──────────────────────────────────────────────────────────────
+$router->get('/setup', function () use ($db) {
+    (new CoyshCRM\Controllers\AuthController($db))->showSetup();
+});
+$router->post('/setup', function () use ($db) {
+    (new CoyshCRM\Controllers\AuthController($db))->setup();
+});
+$router->get('/login', function () use ($db) {
+    (new CoyshCRM\Controllers\AuthController($db))->showLogin();
+});
+$router->post('/login', function () use ($db) {
+    (new CoyshCRM\Controllers\AuthController($db))->login();
+});
+$router->get('/login/2fa', function () use ($db) {
+    (new CoyshCRM\Controllers\AuthController($db))->show2fa();
+});
+$router->post('/login/2fa', function () use ($db) {
+    (new CoyshCRM\Controllers\AuthController($db))->verify2fa();
+});
+$router->post('/logout', function () use ($db) {
+    (new CoyshCRM\Controllers\AuthController($db))->logout();
+});
+
 // ── Dashboard ──────────────────────────────────────────────────────────────
 $router->get('/', function () use ($db) {
     (new CoyshCRM\Controllers\DashboardController($db))->index();

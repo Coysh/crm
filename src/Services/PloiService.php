@@ -14,18 +14,20 @@ class PloiService
 
     public function getConfig(): ?array
     {
-        return $this->db->query("SELECT * FROM ploi_config WHERE id = 1")->fetch() ?: null;
+        $row = $this->db->query("SELECT * FROM ploi_config WHERE id = 1")->fetch() ?: null;
+        return Secrets::decryptRow($row, ['api_token']);
     }
 
     public function saveToken(string $token): void
     {
+        $encrypted = Secrets::encrypt($token);
         $exists = $this->db->query("SELECT id FROM ploi_config WHERE id = 1")->fetch();
         if ($exists) {
-            $this->db->prepare("UPDATE ploi_config SET api_token = ? WHERE id = 1")->execute([$token]);
+            $this->db->prepare("UPDATE ploi_config SET api_token = ? WHERE id = 1")->execute([$encrypted]);
             return;
         }
 
-        $this->db->prepare("INSERT INTO ploi_config (id, api_token) VALUES (1, ?)")->execute([$token]);
+        $this->db->prepare("INSERT INTO ploi_config (id, api_token) VALUES (1, ?)")->execute([$encrypted]);
     }
 
     public function disconnect(): void

@@ -11,6 +11,7 @@ data/*.db-wal
 .env
 .env.local
 .env.*.local
+data/*.key
 
 # AI assistant config
 .claude/
