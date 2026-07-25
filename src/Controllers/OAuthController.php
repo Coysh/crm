@@ -112,7 +112,7 @@ class OAuthController
         $deny = function (string $error, string $desc) use ($redirectUri, $state): never {
             $sep = str_contains($redirectUri, '?') ? '&' : '?';
             $qs  = http_build_query(array_filter(['error' => $error, 'error_description' => $desc, 'state' => $state]));
-            redirect($redirectUri . $sep . $qs);
+            $this->handBack($redirectUri . $sep . $qs, denied: true);
         };
 
         if ($responseType !== 'code')                     $deny('unsupported_response_type', 'Only response_type=code is supported');
@@ -150,14 +150,26 @@ class OAuthController
 
         if (($_POST['decision'] ?? '') !== 'approve') {
             $qs = http_build_query(array_filter(['error' => 'access_denied', 'state' => $req['state']]));
-            redirect($req['redirect_uri'] . $sep . $qs);
+            $this->handBack($req['redirect_uri'] . $sep . $qs, denied: true);
         }
 
         $code = $this->oauth->issueCode(
             $req['client_id'], $req['redirect_uri'], $req['code_challenge'], $req['scope'], $req['resource']
         );
         $qs = http_build_query(array_filter(['code' => $code, 'state' => $req['state']]));
-        redirect($req['redirect_uri'] . $sep . $qs);
+        $this->handBack($req['redirect_uri'] . $sep . $qs);
+    }
+
+    /**
+     * Hand the browser back to the client's redirect URI after consent.
+     * A plain 302 off the form POST is blocked by the consent page's CSP
+     * (form-action 'self' applies to the submission's redirect chain), so we
+     * render a page that navigates via script instead.
+     */
+    private function handBack(string $redirectUrl, bool $denied = false): never
+    {
+        render('oauth.redirect', ['redirectUrl' => $redirectUrl, 'denied' => $denied], 'Returning…', 'layouts/auth');
+        exit;
     }
 
     // ── Token endpoint (public) ──────────────────────────────────────────
