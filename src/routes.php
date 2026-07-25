@@ -8,9 +8,9 @@ use Bramus\Router\Router;
 /** @var PDO $db */
 
 // ── Authentication guard ────────────────────────────────────────────────────
-// Runs before every route. Allows the auth endpoints and static assets through;
-// everything else requires an authenticated session.
-$router->before('GET|POST', '/.*', function () {
+// Runs before every route, on every HTTP verb. Allows the auth endpoints and
+// static assets through; everything else requires an authenticated session.
+$router->before('GET|POST|PUT|PATCH|DELETE|OPTIONS|HEAD', '/.*', function () {
     $path = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?: '/';
 
     $public = ['/login', '/login/2fa', '/logout', '/setup'];
@@ -372,6 +372,18 @@ $router->post('/settings/ploi/sync-domains', function () use ($db) {
 });
 $router->post('/settings/ploi/exclusions/(\d+)/remove', function ($id) use ($db) {
     (new CoyshCRM\Controllers\SettingsController($db))->removePloiExclusion((int)$id);
+});
+$router->post('/settings/ploi/errors/dismiss', function () use ($db) {
+    (new CoyshCRM\Controllers\SettingsController($db))->dismissPloiError();
+});
+$router->post('/settings/ploi/stale/purge', function () use ($db) {
+    (new CoyshCRM\Controllers\SettingsController($db))->purgeStalePloi();
+});
+$router->post('/settings/ploi/servers/(\d+)/exclude', function ($ploiId) use ($db) {
+    (new CoyshCRM\Controllers\SettingsController($db))->excludePloiServer((int)$ploiId);
+});
+$router->post('/settings/ploi/server-exclusions/(\d+)/remove', function ($id) use ($db) {
+    (new CoyshCRM\Controllers\SettingsController($db))->removePloiServerExclusion((int)$id);
 });
 
 // ── Cloudflare Settings ────────────────────────────────────────────────────

@@ -40,6 +40,7 @@ class PloiSync
         $logId = $this->logStart('servers');
         $seen = [];
         $count = 0;
+        $excludedServerIds = $this->excludedServerPloiIds();
 
         try {
             $ploi = $this->ploiService->sdk();
@@ -51,6 +52,7 @@ class PloiSync
                 foreach ($servers as $server) {
                     $sid = (int)($server['id'] ?? 0);
                     if (!$sid) continue;
+                    if (in_array($sid, $excludedServerIds, true)) continue;
                     $seen[] = $sid;
 
                     $detail = $ploi->servers($sid)->get();
@@ -146,12 +148,17 @@ class PloiSync
             $excludedPloiIds = array_map('intval', $excludedPloiIds);
         } catch (\Throwable) {}
 
+        $excludedServerIds = $this->excludedServerPloiIds();
+
         try {
             $ploi = $this->ploiService->sdk();
-            $servers = $this->db->query('SELECT id, ploi_id FROM ploi_servers')->fetchAll();
+            // Skip servers that no longer exist in Ploi (stale) or were excluded —
+            // fetching sites for them 404s on every sync.
+            $servers = $this->db->query('SELECT id, ploi_id FROM ploi_servers WHERE is_stale = 0')->fetchAll();
 
             foreach ($servers as $server) {
                 $sid = (int)$server['ploi_id'];
+                if (in_array($sid, $excludedServerIds, true)) continue;
                 try {
                 for ($page = 1; $page <= 100; $page++) {
                     $resp = $ploi->servers($sid)->sites()->perPage(50)->page($page);
@@ -250,6 +257,16 @@ class PloiSync
                         $count++;
                     }
                 }
+                } catch (\Ploi\Exceptions\Http\NotFound) {
+                    // Server no longer exists in Ploi — mark stale so future syncs
+                    // skip it, and log informationally rather than as a failure.
+                    $this->db->prepare("UPDATE ploi_servers SET is_stale = 1 WHERE ploi_id = ?")->execute([$sid]);
+                    $this->logComplete(
+                        $this->logStart('sites_server_' . $sid),
+                        'skipped_stale',
+                        0,
+                        "Server $sid no longer exists in Ploi — marked stale."
+                    );
                 } catch (Throwable $serverEx) {
                     // Rate limit or error for this server — skip it, continue with others
                     $this->logComplete($this->logStart('sites_server_' . $sid), 'failed', 0, $serverEx->getMessage());
@@ -326,6 +343,28 @@ class PloiSync
 
         $this->db->prepare("UPDATE client_sites SET domain_id = ? WHERE id = ?")->execute([$domainId, $clientSiteId]);
         return true;
+    }
+
+    /**
+     * Remove shadow rows for servers/sites that no longer exist in Ploi.
+     * CRM records (servers, client_sites) are untouched — only the Ploi
+     * mirror rows and their links disappear.
+     */
+    public function purgeStale(): array
+    {
+        $sites = $this->db->exec("DELETE FROM ploi_sites WHERE is_stale = 1");
+        $servers = $this->db->exec("DELETE FROM ploi_servers WHERE is_stale = 1");
+        return ['servers' => (int)$servers, 'sites' => (int)$sites];
+    }
+
+    private function excludedServerPloiIds(): array
+    {
+        try {
+            $ids = $this->db->query("SELECT ploi_server_id FROM ploi_server_exclusions")->fetchAll(PDO::FETCH_COLUMN);
+            return array_map('intval', $ids);
+        } catch (Throwable) {
+            return [];
+        }
     }
 
     private function flagStale(string $table, array $seenPloiIds): void

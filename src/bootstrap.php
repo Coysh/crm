@@ -63,6 +63,9 @@ try {
         PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
     ]);
     $db->exec('PRAGMA foreign_keys = ON');
+    // SQLite is single-writer: wait instead of failing when a sync script or
+    // the MCP endpoint holds the write lock.
+    $db->exec('PRAGMA busy_timeout = 5000');
 } catch (PDOException $e) {
     die('Database connection failed: ' . $e->getMessage());
 }

@@ -552,7 +552,7 @@ class Client extends Model
         $totalExpenses = 0.0;
         try {
             $totalExpenses = (float)$this->query(
-                "SELECT COALESCE(SUM(amount), 0) FROM expenses WHERE client_id = ? AND COALESCE(ignore_from_pl, 0) = 0",
+                "SELECT COALESCE(SUM(amount), 0) FROM expenses WHERE client_id = ? AND COALESCE(ignore_from_stats, 0) = 0",
                 [$clientId]
             )->fetchColumn();
         } catch (\Throwable) {}
