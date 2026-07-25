@@ -45,6 +45,12 @@
         </div>
 
         <div class="bg-white border border-slate-200 rounded-lg p-6">
+            <h2 class="text-sm font-semibold text-slate-700">MCP Access (Claude)</h2>
+            <p class="text-sm text-slate-500 mt-1">Connect Claude to the CRM via a secured MCP endpoint; manage and revoke connected apps.</p>
+            <a href="/settings/mcp" class="text-sm text-accent-600 hover:underline mt-3 inline-block">Manage MCP Access →</a>
+        </div>
+
+        <div class="bg-white border border-slate-200 rounded-lg p-6">
             <div class="flex items-center justify-between">
                 <h2 class="text-sm font-semibold text-slate-700">Data Quality</h2>
                 <?php if (($dataQualityIssues ?? 0) > 0): ?>

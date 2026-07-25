@@ -379,6 +379,45 @@ class SettingsController
         redirect('/settings/ploi');
     }
 
+    public function mcp(): void
+    {
+        $clients = $tokens = [];
+        try {
+            $clients = $this->db->query("
+                SELECT oc.*,
+                       (SELECT COUNT(*) FROM oauth_tokens ot WHERE ot.client_id = oc.client_id AND ot.token_type = 'refresh' AND ot.revoked = 0 AND ot.expires_at > datetime('now')) AS active_grants,
+                       (SELECT MAX(ot.last_used_at) FROM oauth_tokens ot WHERE ot.client_id = oc.client_id) AS last_used_at
+                FROM oauth_clients oc ORDER BY oc.created_at DESC
+            ")->fetchAll();
+            $tokens = $this->db->query("
+                SELECT family_id, client_id, MIN(created_at) AS granted_at, MAX(last_used_at) AS last_used_at,
+                       SUM(CASE WHEN revoked = 0 AND expires_at > datetime('now') THEN 1 ELSE 0 END) AS live_tokens
+                FROM oauth_tokens GROUP BY family_id, client_id
+                HAVING live_tokens > 0 ORDER BY granted_at DESC
+            ")->fetchAll();
+        } catch (\Throwable) {}
+
+        $mcpUrl = appUrl() . '/mcp';
+        $breadcrumbs = [['Settings', '/settings'], ['MCP Access', null]];
+        render('settings.mcp', compact('clients', 'tokens', 'mcpUrl', 'breadcrumbs'), 'MCP Access');
+    }
+
+    public function revokeMcpClient(int $id): void
+    {
+        if (!csrfCheck()) { flash('error', 'Invalid form token — please try again.'); redirect('/settings/mcp'); }
+        try {
+            $stmt = $this->db->prepare("SELECT client_id, client_name FROM oauth_clients WHERE id = ?");
+            $stmt->execute([$id]);
+            if ($row = $stmt->fetch()) {
+                (new \CoyshCRM\Services\OAuthService($this->db))->revokeClient($row['client_id']);
+                flash('success', "Revoked access for '" . ($row['client_name'] ?: $row['client_id']) . "'.");
+            }
+        } catch (\Throwable $e) {
+            flash('error', 'Failed to revoke: ' . $e->getMessage());
+        }
+        redirect('/settings/mcp');
+    }
+
     private function buildRedirectUri(): string
     {
         $scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';

@@ -13,11 +13,16 @@ use Bramus\Router\Router;
 $router->before('GET|POST|PUT|PATCH|DELETE|OPTIONS|HEAD', '/.*', function () {
     $path = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?: '/';
 
-    $public = ['/login', '/login/2fa', '/logout', '/setup'];
+    // Session-exempt paths. /mcp and the OAuth token/registration endpoints
+    // authenticate with bearer tokens / PKCE instead of the session; the
+    // .well-known metadata is public by design. /oauth/authorize and
+    // /oauth/approve are intentionally NOT exempt — consent requires login+2FA.
+    $public = ['/login', '/login/2fa', '/logout', '/setup',
+               '/mcp', '/oauth/register', '/oauth/token'];
     $isStatic = (bool)preg_match('#^/(css|js|img|favicon|robots)#', $path)
         || (bool)preg_match('#\.(css|js|png|jpe?g|gif|svg|ico|woff2?|map)$#i', $path);
 
-    if (in_array($path, $public, true) || $isStatic) {
+    if (in_array($path, $public, true) || $isStatic || str_starts_with($path, '/.well-known/')) {
         return;
     }
 
@@ -51,6 +56,41 @@ $router->post('/login/2fa', function () use ($db) {
 });
 $router->post('/logout', function () use ($db) {
     (new CoyshCRM\Controllers\AuthController($db))->logout();
+});
+
+// ── MCP + OAuth (bearer/PKCE-authenticated; see guard exemptions above) ────
+$router->get('/.well-known/oauth-authorization-server(/.*)?', function () use ($db) {
+    (new CoyshCRM\Controllers\OAuthController($db))->authServerMetadata();
+});
+$router->get('/.well-known/oauth-protected-resource(/.*)?', function () use ($db) {
+    (new CoyshCRM\Controllers\OAuthController($db))->protectedResourceMetadata();
+});
+$router->options('/.well-known/.*', function () use ($db) {
+    (new CoyshCRM\Controllers\McpController($db))->options();
+});
+$router->post('/oauth/register', function () use ($db) {
+    (new CoyshCRM\Controllers\OAuthController($db))->register();
+});
+$router->get('/oauth/authorize', function () use ($db) {
+    (new CoyshCRM\Controllers\OAuthController($db))->authorize();
+});
+$router->post('/oauth/approve', function () use ($db) {
+    (new CoyshCRM\Controllers\OAuthController($db))->approve();
+});
+$router->post('/oauth/token', function () use ($db) {
+    (new CoyshCRM\Controllers\OAuthController($db))->token();
+});
+$router->post('/mcp', function () use ($db) {
+    (new CoyshCRM\Controllers\McpController($db))->post();
+});
+$router->get('/mcp', function () use ($db) {
+    (new CoyshCRM\Controllers\McpController($db))->get();
+});
+$router->options('/mcp', function () use ($db) {
+    (new CoyshCRM\Controllers\McpController($db))->options();
+});
+$router->options('/oauth/.*', function () use ($db) {
+    (new CoyshCRM\Controllers\McpController($db))->options();
 });
 
 // ── Dashboard ──────────────────────────────────────────────────────────────
@@ -406,6 +446,12 @@ $router->post('/settings/ploi/exclusions/(\d+)/remove', function ($id) use ($db)
 });
 $router->get('/settings/data-quality', function () use ($db) {
     (new CoyshCRM\Controllers\DataQualityController($db))->index();
+});
+$router->get('/settings/mcp', function () use ($db) {
+    (new CoyshCRM\Controllers\SettingsController($db))->mcp();
+});
+$router->post('/settings/mcp/clients/(\d+)/revoke', function ($id) use ($db) {
+    (new CoyshCRM\Controllers\SettingsController($db))->revokeMcpClient((int)$id);
 });
 $router->post('/settings/ploi/errors/dismiss', function () use ($db) {
     (new CoyshCRM\Controllers\SettingsController($db))->dismissPloiError();
