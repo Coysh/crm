@@ -122,9 +122,20 @@ class DashboardController
             WHERE fri.next_recurs_on IS NOT NULL AND fri.recurring_status = 'Active'
               AND fri.next_recurs_on BETWEEN ? AND ?
 
+            UNION ALL
+
+            SELECT 'agreement' AS type, c.name || ' — ' || a.title AS name,
+                   a.renewal_date AS due_date,
+                   a.fee_amount AS amount, a.fee_billing_cycle AS billing_cycle,
+                   c.name AS client_name, c.id AS client_id,
+                   '/clients/' || c.id AS detail_url
+            FROM agreements a JOIN clients c ON c.id = a.client_id
+            WHERE a.status = 'active' AND a.renewal_date IS NOT NULL
+              AND a.renewal_date BETWEEN ? AND ?
+
             ORDER BY due_date ASC
         ");
-        $stmt->execute([$cutoff, $horizon, $cutoff, $horizon, $cutoff, $horizon]);
+        $stmt->execute([$cutoff, $horizon, $cutoff, $horizon, $cutoff, $horizon, $cutoff, $horizon]);
         $allRenewals = $stmt->fetchAll();
 
         // Annotate with relative time and urgency

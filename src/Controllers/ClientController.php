@@ -551,19 +551,32 @@ class ClientController
         $client = $this->model->findById($id);
         if (!$client) { redirect('/clients'); return; }
 
-        $type = in_array($_POST['type'] ?? '', ['proposal', 'contract']) ? $_POST['type'] : 'proposal';
+        $type = in_array($_POST['type'] ?? '', ['proposal', 'contract', 'agreement']) ? $_POST['type'] : 'proposal';
         $file = $_FILES['attachment'] ?? null;
         if (!$file || $file['error'] !== UPLOAD_ERR_OK) { flash('error', 'Upload failed.'); redirect("/clients/$id"); }
         if (($file['type'] ?? '') !== 'application/pdf') { flash('error', 'Only PDF files are allowed.'); redirect("/clients/$id"); }
+
+        // Optional link to one of this client's agreements
+        $agreementId = ($_POST['agreement_id'] ?? '') !== '' ? (int)$_POST['agreement_id'] : null;
+        if ($agreementId) {
+            try {
+                $chk = $this->db->prepare("SELECT 1 FROM agreements WHERE id = ? AND client_id = ?");
+                $chk->execute([$agreementId, $id]);
+                if (!$chk->fetchColumn()) $agreementId = null;
+            } catch (\Throwable) { $agreementId = null; }
+        }
 
         $dir = DATA_PATH . '/attachments';
         if (!is_dir($dir)) mkdir($dir, 0775, true);
         $safe = time() . '-' . preg_replace('/[^a-zA-Z0-9._-]/', '-', basename($file['name']));
         $target = $dir . '/' . $safe;
-        move_uploaded_file($file['tmp_name'], $target);
+        if (!move_uploaded_file($file['tmp_name'], $target)) {
+            flash('error', 'Failed to store uploaded file.');
+            redirect("/clients/$id");
+        }
 
-        $this->db->prepare("INSERT INTO client_attachments (client_id, type, original_name, file_path) VALUES (?, ?, ?, ?)")
-            ->execute([$id, $type, $file['name'], $target]);
+        $this->db->prepare("INSERT INTO client_attachments (client_id, type, original_name, file_path, agreement_id) VALUES (?, ?, ?, ?, ?)")
+            ->execute([$id, $type, $file['name'], $target, $agreementId]);
 
         flash('success', 'Attachment uploaded.');
         redirect("/clients/$id");

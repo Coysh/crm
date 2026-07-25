@@ -441,9 +441,26 @@ class Client extends Model
             if (!$hasSites || !$hasDomains) $flags[] = 'incomplete_setup';
         }
 
-        // Support-only and consultancy-only clients should have agreement notes
+        // Structured agreements: renewal overdue / hours exhausted apply to everyone;
+        // support/consultancy clients are flagged when they have neither an active
+        // agreement nor legacy agreement notes.
+        $agreements = [];
+        try {
+            $agreements = (new Agreement($this->db))->findByClient($clientId);
+        } catch (\Throwable) {}
+        $activeAgreements = array_filter($agreements, fn($a) => $a['status'] === 'active');
+
         if (in_array($clientType, ['support_only', 'consultancy_only'])) {
-            if (empty($client['agreement_notes'])) $flags[] = 'no_agreement';
+            if (!$activeAgreements && empty($client['agreement_notes'])) $flags[] = 'no_agreement';
+        }
+        $today = date('Y-m-d');
+        foreach ($activeAgreements as $a) {
+            if (!empty($a['renewal_date']) && $a['renewal_date'] < $today && !in_array('agreement_renewal_overdue', $flags)) {
+                $flags[] = 'agreement_renewal_overdue';
+            }
+            if ($a['hours_remaining'] !== null && $a['hours_remaining'] <= 0 && !in_array('hours_exhausted', $flags)) {
+                $flags[] = 'hours_exhausted';
+            }
         }
 
         $count  = count($flags);
@@ -505,6 +522,18 @@ class Client extends Model
         )->fetchAll(\PDO::FETCH_COLUMN);
         $domainSet = array_flip($domainIds);
 
+        // Aggregate: active structured agreements (with usage for hours flags)
+        $agreementSet = $renewalOverdueSet = $hoursExhaustedSet = [];
+        try {
+            $today = date('Y-m-d');
+            foreach ((new Agreement($this->db))->findAllWithClient('active') as $a) {
+                $acid = (int)$a['client_id'];
+                $agreementSet[$acid] = true;
+                if (!empty($a['renewal_date']) && $a['renewal_date'] < $today) $renewalOverdueSet[$acid] = true;
+                if ($a['hours_remaining'] !== null && $a['hours_remaining'] <= 0) $hoursExhaustedSet[$acid] = true;
+            }
+        } catch (\Throwable) {}
+
         $result = [];
         foreach ($activeClients as $row) {
             $cid        = (int)$row['id'];
@@ -522,9 +551,12 @@ class Client extends Model
                 $flags[] = 'incomplete_setup';
             }
 
-            if (in_array($clientType, ['support_only', 'consultancy_only']) && empty($row['agreement_notes'])) {
+            if (in_array($clientType, ['support_only', 'consultancy_only'])
+                && !isset($agreementSet[$cid]) && empty($row['agreement_notes'])) {
                 $flags[] = 'no_agreement';
             }
+            if (isset($renewalOverdueSet[$cid])) $flags[] = 'agreement_renewal_overdue';
+            if (isset($hoursExhaustedSet[$cid])) $flags[] = 'hours_exhausted';
 
             $count  = count($flags);
             $status = match(true) {
@@ -570,6 +602,15 @@ class Client extends Model
         $client['projects'] = $this->query("SELECT * FROM projects WHERE client_id = ? ORDER BY created_at DESC", [$id])->fetchAll();
         $client['expenses'] = $this->query("SELECT e.*, s.name AS server_name, p.name AS project_name FROM expenses e LEFT JOIN servers s ON s.id = e.server_id LEFT JOIN projects p ON p.id = e.project_id WHERE e.client_id = ? ORDER BY e.date DESC", [$id])->fetchAll();
         $client['attachments'] = $this->query("SELECT * FROM client_attachments WHERE client_id = ? ORDER BY uploaded_at DESC", [$id])->fetchAll();
+        $client['agreements'] = [];
+        try {
+            $agreementModel = new Agreement($this->db);
+            $client['agreements'] = array_map(function ($a) use ($agreementModel) {
+                $a['work_log']    = $agreementModel->workLog((int)$a['id'], 20);
+                $a['attachments'] = $agreementModel->attachments((int)$a['id']);
+                return $a;
+            }, $agreementModel->findByClient($id));
+        } catch (\Throwable) {}
         $client['pl']          = $this->getPL($id);
         $client['pl_recurring'] = $this->getRecurringCostsBreakdown($id);
         $client['pl_alltime']  = $this->getAllTimePL($id);

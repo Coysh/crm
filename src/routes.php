@@ -206,6 +206,32 @@ $router->post('/clients/(\d+)/domains/(\d+)/delete', function ($clientId, $id) u
     (new CoyshCRM\Controllers\DomainController($db))->destroy((int)$clientId, (int)$id);
 });
 
+// ── Agreements / SLAs ─────────────────────────────────────────────────────
+$router->get('/agreements', function () use ($db) {
+    (new CoyshCRM\Controllers\AgreementController($db))->index();
+});
+$router->get('/clients/(\d+)/agreements/create', function ($clientId) use ($db) {
+    (new CoyshCRM\Controllers\AgreementController($db))->create((int)$clientId);
+});
+$router->post('/clients/(\d+)/agreements', function ($clientId) use ($db) {
+    (new CoyshCRM\Controllers\AgreementController($db))->store((int)$clientId);
+});
+$router->get('/clients/(\d+)/agreements/(\d+)/edit', function ($clientId, $id) use ($db) {
+    (new CoyshCRM\Controllers\AgreementController($db))->edit((int)$clientId, (int)$id);
+});
+$router->post('/clients/(\d+)/agreements/(\d+)', function ($clientId, $id) use ($db) {
+    (new CoyshCRM\Controllers\AgreementController($db))->update((int)$clientId, (int)$id);
+});
+$router->post('/clients/(\d+)/agreements/(\d+)/delete', function ($clientId, $id) use ($db) {
+    (new CoyshCRM\Controllers\AgreementController($db))->destroy((int)$clientId, (int)$id);
+});
+$router->post('/clients/(\d+)/agreements/(\d+)/work', function ($clientId, $id) use ($db) {
+    (new CoyshCRM\Controllers\AgreementController($db))->storeWork((int)$clientId, (int)$id);
+});
+$router->post('/clients/(\d+)/agreements/(\d+)/work/(\d+)/delete', function ($clientId, $id, $logId) use ($db) {
+    (new CoyshCRM\Controllers\AgreementController($db))->deleteWork((int)$clientId, (int)$id, (int)$logId);
+});
+
 // ── Client Sites (sub-resource of client) ─────────────────────────────────
 $router->get('/clients/(\d+)/sites/create', function ($clientId) use ($db) {
     (new CoyshCRM\Controllers\ClientSiteController($db))->create((int)$clientId);
