@@ -206,6 +206,11 @@ $router->post('/clients/(\d+)/domains/(\d+)/delete', function ($clientId, $id) u
     (new CoyshCRM\Controllers\DomainController($db))->destroy((int)$clientId, (int)$id);
 });
 
+// ── Renewals ──────────────────────────────────────────────────────────────
+$router->get('/renewals', function () use ($db) {
+    (new CoyshCRM\Controllers\RenewalController($db))->index();
+});
+
 // ── Agreements / SLAs ─────────────────────────────────────────────────────
 $router->get('/agreements', function () use ($db) {
     (new CoyshCRM\Controllers\AgreementController($db))->index();
@@ -398,6 +403,9 @@ $router->post('/settings/ploi/sync-domains', function () use ($db) {
 });
 $router->post('/settings/ploi/exclusions/(\d+)/remove', function ($id) use ($db) {
     (new CoyshCRM\Controllers\SettingsController($db))->removePloiExclusion((int)$id);
+});
+$router->get('/settings/data-quality', function () use ($db) {
+    (new CoyshCRM\Controllers\DataQualityController($db))->index();
 });
 $router->post('/settings/ploi/errors/dismiss', function () use ($db) {
     (new CoyshCRM\Controllers\SettingsController($db))->dismissPloiError();

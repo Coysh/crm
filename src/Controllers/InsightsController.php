@@ -90,14 +90,18 @@ class InsightsController
         $timeframe    = (int)($_GET['timeframe'] ?? 90);
         $timeframe    = in_array($timeframe, [30, 60, 90, 180, 365]) ? $timeframe : 90;
         $typeFilter   = $_GET['type'] ?? 'all';
-        $typeFilter   = in_array($typeFilter, ['all', 'domain', 'recurring_cost', 'recurring_invoice']) ? $typeFilter : 'all';
+        $typeFilter   = in_array($typeFilter, array_merge(['all'], \CoyshCRM\Services\Renewals::TYPES)) ? $typeFilter : 'all';
 
-        $renewals = $this->fetchRenewals($timeframe, $typeFilter);
+        $renewals = (new \CoyshCRM\Services\Renewals($this->db))->fetch($timeframe, $typeFilter);
+
+        // ── Income category breakdown ─────────────────────────────────────
+
+        $categoryBreakdown = $this->categoryBreakdown($startThisStr, $endThisStr, $startLastStr, $endLastStr);
 
         // ── Client health ─────────────────────────────────────────────────
 
         $clientModel  = new Client($this->db);
-        $healthAll    = $clientModel->getHealthAll();
+        $healthAll    = $clientModel->getHealthAll($clientModel->getPLAll());
 
         $allClients = $this->db->query("SELECT id, name FROM clients WHERE status = 'active' ORDER BY name")->fetchAll();
 
@@ -117,7 +121,7 @@ class InsightsController
         // Whether "prev year" navigation is possible — check if data exists before this FY
         $chartHasPrev = false;
         try {
-            $minInvoice = $this->db->query("SELECT MIN(dated_on) FROM freeagent_invoices WHERE dated_on IS NOT NULL AND status IN ('paid','sent','overdue')")->fetchColumn();
+            $minInvoice = $this->db->query("SELECT MIN(dated_on) FROM freeagent_invoices WHERE dated_on IS NOT NULL AND COALESCE(status_override, status) IN ('paid','sent','overdue')")->fetchColumn();
             if ($minInvoice) {
                 $prevFYStart = (clone $startThis)->modify('-1 year')->format('Y-m-d');
                 $chartHasPrev = $prevFYStart >= substr($minInvoice, 0, 7) . '-01';
@@ -134,6 +138,7 @@ class InsightsController
             'currentFYStart',
             'chartHasPrev',
             'perClient',
+            'categoryBreakdown',
             'renewals', 'timeframe', 'typeFilter',
             'healthRows', 'healthStatusFilter',
             'yearlyPL'
@@ -291,7 +296,7 @@ class InsightsController
         // Find earliest data year for "has previous" check
         $earliestDate = null;
         try {
-            $earliestDate = $this->db->query("SELECT MIN(dated_on) FROM freeagent_invoices WHERE dated_on IS NOT NULL AND status IN ('paid','sent','overdue')")->fetchColumn();
+            $earliestDate = $this->db->query("SELECT MIN(dated_on) FROM freeagent_invoices WHERE dated_on IS NOT NULL AND COALESCE(status_override, status) IN ('paid','sent','overdue')")->fetchColumn();
         } catch (\Throwable) {}
 
         $hasPrev = $earliestDate && $startPrev->format('Y-m-d') >= substr($earliestDate, 0, 7) . '-01';
@@ -305,7 +310,7 @@ class InsightsController
             $mEnd   = min($cursor->format('Y-m-t'), $endThis->format('Y-m-d'));
 
             try {
-                $stmt = $this->db->prepare("SELECT COALESCE(SUM(total_value), 0) FROM freeagent_invoices WHERE dated_on BETWEEN ? AND ? AND status IN ('paid','sent','overdue')");
+                $stmt = $this->db->prepare("SELECT COALESCE(SUM(COALESCE(net_value, total_value)), 0) FROM freeagent_invoices WHERE dated_on BETWEEN ? AND ? AND COALESCE(status_override, status) IN ('paid','sent','overdue')");
                 $stmt->execute([$mStart, $mEnd]);
                 $thisRev = (float)$stmt->fetchColumn();
             } catch (\Throwable) { $thisRev = 0.0; }
@@ -317,7 +322,7 @@ class InsightsController
             $pStart = (clone $cursor)->modify('-1 year')->format('Y-m-01');
             $pEnd   = (clone $cursor)->modify('-1 year')->format('Y-m-t');
             try {
-                $stmt = $this->db->prepare("SELECT COALESCE(SUM(total_value), 0) FROM freeagent_invoices WHERE dated_on BETWEEN ? AND ? AND status IN ('paid','sent','overdue')");
+                $stmt = $this->db->prepare("SELECT COALESCE(SUM(COALESCE(net_value, total_value)), 0) FROM freeagent_invoices WHERE dated_on BETWEEN ? AND ? AND COALESCE(status_override, status) IN ('paid','sent','overdue')");
                 $stmt->execute([$pStart, $pEnd]);
                 $prevRev = (float)$stmt->fetchColumn();
             } catch (\Throwable) { $prevRev = 0.0; }
@@ -354,14 +359,41 @@ class InsightsController
     {
         try {
             $stmt = $this->db->prepare("
-                SELECT COALESCE(SUM(total_value), 0) FROM freeagent_invoices
+                SELECT COALESCE(SUM(COALESCE(net_value, total_value)), 0) FROM freeagent_invoices
                 WHERE dated_on BETWEEN ? AND ?
-                  AND status IN ('paid', 'sent', 'overdue')
+                  AND COALESCE(status_override, status) IN ('paid', 'sent', 'overdue')
             ");
             $stmt->execute([$start, $end]);
             return (float)$stmt->fetchColumn();
         } catch (\Throwable) {
             return 0.0;
+        }
+    }
+
+    /**
+     * Revenue by FreeAgent income category for the current and comparison
+     * periods, with YoY delta. Sparse categories show as Uncategorised until a
+     * full FreeAgent resync backfills them.
+     */
+    private function categoryBreakdown(string $startThis, string $endThis, string $startLast, string $endLast): array
+    {
+        try {
+            $stmt = $this->db->prepare("
+                SELECT COALESCE(NULLIF(TRIM(category), ''), 'Uncategorised') AS category,
+                       COALESCE(SUM(CASE WHEN dated_on BETWEEN :sT AND :eT THEN COALESCE(net_value, total_value) ELSE 0 END), 0) AS this_period,
+                       COALESCE(SUM(CASE WHEN dated_on BETWEEN :sL AND :eL THEN COALESCE(net_value, total_value) ELSE 0 END), 0) AS last_period,
+                       SUM(CASE WHEN dated_on BETWEEN :sT AND :eT THEN 1 ELSE 0 END) AS invoice_count
+                FROM freeagent_invoices
+                WHERE COALESCE(status_override, status) IN ('paid','sent','overdue')
+                  AND (dated_on BETWEEN :sT AND :eT OR dated_on BETWEEN :sL AND :eL)
+                GROUP BY 1
+                HAVING this_period > 0 OR last_period > 0
+                ORDER BY this_period DESC
+            ");
+            $stmt->execute([':sT' => $startThis, ':eT' => $endThis, ':sL' => $startLast, ':eL' => $endLast]);
+            return $stmt->fetchAll();
+        } catch (\Throwable) {
+            return [];
         }
     }
 
@@ -399,7 +431,7 @@ class InsightsController
             $stmt = $this->db->prepare("
                 SELECT COUNT(DISTINCT client_id) FROM freeagent_invoices
                 WHERE dated_on BETWEEN ? AND ?
-                  AND status IN ('paid','sent','overdue')
+                  AND COALESCE(status_override, status) IN ('paid','sent','overdue')
                   AND client_id IS NOT NULL
             ");
             $stmt->execute([$start, $end]);
@@ -418,8 +450,8 @@ class InsightsController
             $monthEnd   = $cursor->format('Y-m-t');
 
             $stmtThis = $this->db->prepare("
-                SELECT COALESCE(SUM(total_value), 0) FROM freeagent_invoices
-                WHERE dated_on BETWEEN ? AND ? AND status IN ('paid','sent','overdue')
+                SELECT COALESCE(SUM(COALESCE(net_value, total_value)), 0) FROM freeagent_invoices
+                WHERE dated_on BETWEEN ? AND ? AND COALESCE(status_override, status) IN ('paid','sent','overdue')
             ");
             $stmtThis->execute([$monthStart, min($monthEnd, $endThis->format('Y-m-d'))]);
             $thisVal = (float)$stmtThis->fetchColumn();
@@ -428,8 +460,8 @@ class InsightsController
             $lastMonthStart = (clone $cursor)->modify('-1 year')->format('Y-m-01');
             $lastMonthEnd   = (clone $cursor)->modify('-1 year')->format('Y-m-t');
             $stmtLast = $this->db->prepare("
-                SELECT COALESCE(SUM(total_value), 0) FROM freeagent_invoices
-                WHERE dated_on BETWEEN ? AND ? AND status IN ('paid','sent','overdue')
+                SELECT COALESCE(SUM(COALESCE(net_value, total_value)), 0) FROM freeagent_invoices
+                WHERE dated_on BETWEEN ? AND ? AND COALESCE(status_override, status) IN ('paid','sent','overdue')
             ");
             $stmtLast->execute([$lastMonthStart, min($lastMonthEnd, $endLast->format('Y-m-d'))]);
             $lastVal = (float)$stmtLast->fetchColumn();
@@ -451,10 +483,10 @@ class InsightsController
             $stmt = $this->db->prepare("
                 SELECT
                     c.id, c.name,
-                    COALESCE(SUM(CASE WHEN fi.dated_on BETWEEN :sT AND :eT THEN fi.total_value ELSE 0 END), 0) AS this_year,
-                    COALESCE(SUM(CASE WHEN fi.dated_on BETWEEN :sL AND :eL THEN fi.total_value ELSE 0 END), 0) AS last_year
+                    COALESCE(SUM(CASE WHEN fi.dated_on BETWEEN :sT AND :eT THEN COALESCE(fi.net_value, fi.total_value) ELSE 0 END), 0) AS this_year,
+                    COALESCE(SUM(CASE WHEN fi.dated_on BETWEEN :sL AND :eL THEN COALESCE(fi.net_value, fi.total_value) ELSE 0 END), 0) AS last_year
                 FROM clients c
-                LEFT JOIN freeagent_invoices fi ON fi.client_id = c.id AND fi.status IN ('paid','sent','overdue')
+                LEFT JOIN freeagent_invoices fi ON fi.client_id = c.id AND COALESCE(fi.status_override, fi.status) IN ('paid','sent','overdue')
                 WHERE c.status = 'active'
                 GROUP BY c.id, c.name
                 ORDER BY this_year DESC
@@ -487,7 +519,7 @@ class InsightsController
         // Find earliest invoice date to know how far back to go
         $minDate = null;
         try {
-            $minDate = $this->db->query("SELECT MIN(dated_on) FROM freeagent_invoices WHERE dated_on IS NOT NULL AND status IN ('paid','sent','overdue')")->fetchColumn();
+            $minDate = $this->db->query("SELECT MIN(dated_on) FROM freeagent_invoices WHERE dated_on IS NOT NULL AND COALESCE(status_override, status) IN ('paid','sent','overdue')")->fetchColumn();
         } catch (\Throwable) {}
 
         if (!$minDate) {
@@ -543,7 +575,7 @@ class InsightsController
             $margin  = $revenue > 0 ? ($profit / $revenue) * 100 : 0;
 
             try {
-                $stmtCount = $this->db->prepare("SELECT COUNT(*) FROM freeagent_invoices WHERE dated_on BETWEEN ? AND ? AND status IN ('paid','sent','overdue')");
+                $stmtCount = $this->db->prepare("SELECT COUNT(*) FROM freeagent_invoices WHERE dated_on BETWEEN ? AND ? AND COALESCE(status_override, status) IN ('paid','sent','overdue')");
                 $stmtCount->execute([$yr['start'], $yr['end']]);
                 $invoiceCount = (int)$stmtCount->fetchColumn();
             } catch (\Throwable) {
@@ -588,95 +620,5 @@ class InsightsController
         }
 
         return $result;
-    }
-
-    private function fetchRenewals(int $days, string $typeFilter): array
-    {
-        $today   = date('Y-m-d');
-        $cutoff  = date('Y-m-d', strtotime("-30 days"));
-        $horizon = date('Y-m-d', strtotime("+{$days} days"));
-
-        $parts = [];
-        $params = [];
-
-        if ($typeFilter === 'all' || $typeFilter === 'domain') {
-            $parts[] = "
-                SELECT 'domain' AS type, d.domain AS name, d.renewal_date AS due_date,
-                       COALESCE(d.client_charge, d.annual_cost) AS amount, 'annual' AS cycle,
-                       c.id AS client_id, c.name AS client_name,
-                       NULL AS shared_with,
-                       '/clients/' || c.id AS detail_url
-                FROM domains d LEFT JOIN clients c ON c.id = d.client_id
-                WHERE d.renewal_date IS NOT NULL
-                  AND d.renewal_date BETWEEN ? AND ?
-            ";
-            $params[] = $cutoff;
-            $params[] = $horizon;
-        }
-
-        if ($typeFilter === 'all' || $typeFilter === 'recurring_cost') {
-            $parts[] = "
-                SELECT 'recurring_cost' AS type, rc.name, rc.renewal_date AS due_date,
-                       rc.amount, rc.billing_cycle AS cycle,
-                       NULL AS client_id, NULL AS client_name,
-                       (SELECT COUNT(DISTINCT client_id) FROM recurring_cost_clients WHERE recurring_cost_id = rc.id AND client_id IS NOT NULL) || ' clients' AS shared_with,
-                       '/expenses/recurring/' || rc.id || '/edit' AS detail_url
-                FROM recurring_costs rc
-                WHERE rc.renewal_date IS NOT NULL AND rc.is_active = 1
-                  AND rc.name NOT LIKE 'Domain: %'
-                  AND rc.renewal_date BETWEEN ? AND ?
-            ";
-            $params[] = $cutoff;
-            $params[] = $horizon;
-        }
-
-        if ($typeFilter === 'all' || $typeFilter === 'recurring_invoice') {
-            $parts[] = "
-                SELECT 'recurring_invoice' AS type, COALESCE(fri.reference, 'Recurring Invoice') AS name,
-                       fri.next_recurs_on AS due_date,
-                       fri.total_value AS amount, fri.frequency AS cycle,
-                       c.id AS client_id, c.name AS client_name,
-                       NULL AS shared_with,
-                       '/clients/' || c.id AS detail_url
-                FROM freeagent_recurring_invoices fri
-                LEFT JOIN clients c ON c.id = fri.client_id
-                WHERE fri.next_recurs_on IS NOT NULL AND fri.recurring_status = 'Active'
-                  AND fri.next_recurs_on BETWEEN ? AND ?
-            ";
-            $params[] = $cutoff;
-            $params[] = $horizon;
-        }
-
-        if (!$parts) return [];
-
-        $sql  = implode(' UNION ALL ', $parts) . ' ORDER BY due_date ASC';
-        $stmt = $this->db->prepare($sql);
-        $stmt->execute($params);
-        $rows = $stmt->fetchAll();
-
-        $todayTs = strtotime($today);
-        foreach ($rows as &$row) {
-            $dueTs    = strtotime($row['due_date']);
-            $diffDays = (int)round(($dueTs - $todayTs) / 86400);
-            $row['days_diff'] = $diffDays;
-            if ($diffDays < 0) {
-                $row['relative'] = 'Overdue';
-                $row['urgency']  = 'red';
-            } elseif ($diffDays <= 7) {
-                $row['relative'] = $diffDays === 0 ? 'Today' : ($diffDays === 1 ? 'Tomorrow' : "{$diffDays} days");
-                $row['urgency']  = 'red';
-            } elseif ($diffDays <= 30) {
-                $weeks = round($diffDays / 7);
-                $row['relative'] = $weeks <= 1 ? "{$diffDays} days" : "{$weeks} weeks";
-                $row['urgency']  = 'amber';
-            } else {
-                $months = round($diffDays / 30);
-                $row['relative'] = $months <= 1 ? "{$diffDays} days" : "{$months} months";
-                $row['urgency']  = 'default';
-            }
-        }
-        unset($row);
-
-        return $rows;
     }
 }

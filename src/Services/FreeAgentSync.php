@@ -223,13 +223,15 @@ class FreeAgentSync
                 $clientId = $contactUrl ? $this->ensureClientForContact($contactUrl) : null;
                 $this->db->prepare("
                     INSERT INTO freeagent_invoices
-                        (freeagent_url, freeagent_contact_url, client_id, reference, total_value, currency, status, dated_on, due_date, paid_on, category, last_synced_at)
-                    VALUES (?,?,?,?,?,?,?,?,?,?,?,datetime('now'))
+                        (freeagent_url, freeagent_contact_url, client_id, reference, total_value, net_value, sales_tax_value, currency, status, dated_on, due_date, paid_on, category, last_synced_at)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'))
                     ON CONFLICT(freeagent_url) DO UPDATE SET
                         freeagent_contact_url = excluded.freeagent_contact_url,
                         client_id             = CASE WHEN freeagent_invoices.client_id IS NOT NULL THEN freeagent_invoices.client_id ELSE excluded.client_id END,
                         reference             = excluded.reference,
                         total_value           = excluded.total_value,
+                        net_value             = excluded.net_value,
+                        sales_tax_value       = excluded.sales_tax_value,
                         currency              = excluded.currency,
                         status                = excluded.status,
                         dated_on              = excluded.dated_on,
@@ -237,7 +239,7 @@ class FreeAgentSync
                         paid_on               = excluded.paid_on,
                         category              = excluded.category,
                         last_synced_at        = excluded.last_synced_at
-                ")->execute([$inv['url'] ?? '', $contactUrl, $clientId, $inv['reference'] ?? null, $inv['total_value'] ?? 0, $inv['currency'] ?? 'GBP', isset($inv['status']) ? strtolower($inv['status']) : null, $inv['dated_on'] ?? null, $inv['due_on'] ?? null, $inv['paid_on'] ?? null, $inv['category'] ?? null]);
+                ")->execute([$inv['url'] ?? '', $contactUrl, $clientId, $inv['reference'] ?? null, $inv['total_value'] ?? 0, $inv['net_value'] ?? null, $inv['sales_tax_value'] ?? null, $inv['currency'] ?? 'GBP', isset($inv['status']) ? strtolower($inv['status']) : null, $inv['dated_on'] ?? null, $inv['due_on'] ?? null, $inv['paid_on'] ?? null, $inv['category'] ?? null]);
             }
             $pages = $this->client->lastPageCount;
             $note  = $pages > 1 ? "{$pages} pages fetched" : null;

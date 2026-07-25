@@ -45,6 +45,19 @@
         </div>
 
         <div class="bg-white border border-slate-200 rounded-lg p-6">
+            <div class="flex items-center justify-between">
+                <h2 class="text-sm font-semibold text-slate-700">Data Quality</h2>
+                <?php if (($dataQualityIssues ?? 0) > 0): ?>
+                    <span class="px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700"><?= (int)$dataQualityIssues ?></span>
+                <?php else: ?>
+                    <span class="px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700">✓</span>
+                <?php endif ?>
+            </div>
+            <p class="text-sm text-slate-500 mt-1">Missing links and incomplete records that skew P&amp;L or hide renewals.</p>
+            <a href="/settings/data-quality" class="text-sm text-accent-600 hover:underline mt-3 inline-block">Review Data Quality →</a>
+        </div>
+
+        <div class="bg-white border border-slate-200 rounded-lg p-6">
             <h2 class="text-sm font-semibold text-slate-700">Deletion Log</h2>
             <p class="text-sm text-slate-500 mt-1">Audit trail of permanently deleted clients and entities.</p>
             <a href="/settings/deletion-log" class="text-sm text-accent-600 hover:underline mt-3 inline-block">View Deletion Log →</a>

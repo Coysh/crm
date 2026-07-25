@@ -304,6 +304,24 @@ function formatDate(?string $date): string
 }
 
 /**
+ * Human-readable label for a client-health flag.
+ */
+function healthFlagLabel(string $flag): string
+{
+    return match($flag) {
+        'loss_making'               => 'Loss-making',
+        'no_retainer'               => 'No retainer',
+        'no_recent_invoice'         => 'No recent invoice',
+        'overdue_invoices'          => 'Overdue invoices',
+        'incomplete_setup'          => 'Incomplete setup',
+        'no_agreement'              => 'No agreement',
+        'agreement_renewal_overdue' => 'Agreement renewal overdue',
+        'hours_exhausted'           => 'SLA hours exhausted',
+        default                     => ucfirst(str_replace('_', ' ', $flag)),
+    };
+}
+
+/**
  * Return CSS classes for a status badge.
  */
 function statusBadge(string $status): string

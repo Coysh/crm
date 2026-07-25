@@ -425,7 +425,7 @@ if (isset($db)) {
         $confirmedMonthly = 0.0;
         $pipelineMonthly  = 0.0;
         foreach ($client['recurring_invoices'] as $ri) {
-            $monthly = \CoyshCRM\Models\FreeAgentRecurringInvoice::toMonthly((float)$ri['total_value'], $ri['frequency']);
+            $monthly = \CoyshCRM\Models\FreeAgentRecurringInvoice::toMonthly((float)($ri['net_value'] ?? $ri['total_value']), $ri['frequency']);
             if ($ri['recurring_status'] === 'Active') $confirmedMonthly += $monthly;
             else $pipelineMonthly += $monthly;
         }
@@ -447,7 +447,7 @@ if (isset($db)) {
                 </thead>
                 <tbody class="divide-y divide-slate-100">
                     <?php foreach ($client['recurring_invoices'] as $ri):
-                        $monthly = \CoyshCRM\Models\FreeAgentRecurringInvoice::toMonthly((float)$ri['total_value'], $ri['frequency']);
+                        $monthly = \CoyshCRM\Models\FreeAgentRecurringInvoice::toMonthly((float)($ri['net_value'] ?? $ri['total_value']), $ri['frequency']);
                         $isActive = $ri['recurring_status'] === 'Active';
                         $statusBadge = $isActive ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700';
                     ?>

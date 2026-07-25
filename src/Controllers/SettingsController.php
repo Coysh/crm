@@ -48,7 +48,9 @@ class SettingsController
         $fxSvc         = new ExchangeRateService($this->db);
         $exchangeRates = $fxSvc->getCurrentRates();
 
-        render('settings.index', compact('faCfg', 'connected', 'ploiCfg', 'ploiConnected', 'ploiStats', 'exchangeRates'), 'Settings');
+        $dataQualityIssues = DataQualityController::issueCount($this->db);
+
+        render('settings.index', compact('faCfg', 'connected', 'ploiCfg', 'ploiConnected', 'ploiStats', 'exchangeRates', 'dataQualityIssues'), 'Settings');
     }
 
     public function refreshExchangeRates(): void
