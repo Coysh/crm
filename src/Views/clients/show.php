@@ -103,7 +103,13 @@ if (isset($db)) {
         $checks[] = ['incomplete_setup', !in_array('incomplete_setup', $health['flags']), 'Site + domain linked', 'Incomplete setup'];
     }
     if (in_array($clientType, ['support_only', 'consultancy_only'])) {
-        $checks[] = ['no_agreement', !in_array('no_agreement', $health['flags']), 'Agreement notes recorded', 'No agreement notes'];
+        $checks[] = ['no_agreement', !in_array('no_agreement', $health['flags']), 'Agreement recorded', 'No agreement recorded'];
+    }
+    if (in_array('agreement_renewal_overdue', $health['flags'])) {
+        $checks[] = ['agreement_renewal_overdue', false, '', 'Agreement renewal overdue'];
+    }
+    if (in_array('hours_exhausted', $health['flags'])) {
+        $checks[] = ['hours_exhausted', false, '', 'SLA hours exhausted this period'];
     }
     ?>
     <div class="bg-white border border-slate-200 rounded-lg overflow-hidden">
@@ -124,22 +130,11 @@ if (isset($db)) {
         </ul>
     </div>
 
-    <?php if ($clientType !== 'managed'): ?>
-    <!-- Agreement Notes (support/consultancy clients) -->
-    <div class="bg-white border border-slate-200 rounded-lg overflow-hidden">
-        <div class="px-5 py-3 border-b border-slate-200 flex items-center justify-between">
-            <h2 class="text-sm font-semibold text-slate-700">Agreement Notes</h2>
-            <a href="/clients/<?= $client['id'] ?>/edit" class="text-xs text-accent-600 hover:underline">Edit</a>
-        </div>
-        <div class="px-5 py-4">
-            <?php if (!empty($client['agreement_notes'])): ?>
-                <p class="text-sm text-slate-700 whitespace-pre-wrap"><?= e($client['agreement_notes']) ?></p>
-            <?php else: ?>
-                <p class="text-sm text-slate-400 italic">No agreement notes recorded. <a href="/clients/<?= $client['id'] ?>/edit" class="text-accent-600 hover:underline">Add notes →</a></p>
-            <?php endif ?>
-        </div>
-    </div>
-    <?php endif ?>
+    <!-- Agreements & SLAs -->
+    <?php
+    $agreements = $client['agreements'] ?? [];
+    include VIEW_PATH . '/clients/_agreements.php';
+    ?>
 
     <!-- P&L Summary Card -->
     <?php
@@ -430,7 +425,7 @@ if (isset($db)) {
         $confirmedMonthly = 0.0;
         $pipelineMonthly  = 0.0;
         foreach ($client['recurring_invoices'] as $ri) {
-            $monthly = \CoyshCRM\Models\FreeAgentRecurringInvoice::toMonthly((float)$ri['total_value'], $ri['frequency']);
+            $monthly = \CoyshCRM\Models\FreeAgentRecurringInvoice::toMonthly((float)($ri['net_value'] ?? $ri['total_value']), $ri['frequency']);
             if ($ri['recurring_status'] === 'Active') $confirmedMonthly += $monthly;
             else $pipelineMonthly += $monthly;
         }
@@ -452,7 +447,7 @@ if (isset($db)) {
                 </thead>
                 <tbody class="divide-y divide-slate-100">
                     <?php foreach ($client['recurring_invoices'] as $ri):
-                        $monthly = \CoyshCRM\Models\FreeAgentRecurringInvoice::toMonthly((float)$ri['total_value'], $ri['frequency']);
+                        $monthly = \CoyshCRM\Models\FreeAgentRecurringInvoice::toMonthly((float)($ri['net_value'] ?? $ri['total_value']), $ri['frequency']);
                         $isActive = $ri['recurring_status'] === 'Active';
                         $statusBadge = $isActive ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700';
                     ?>
@@ -610,8 +605,16 @@ if (isset($db)) {
     <!-- Attachments -->
     <section>
         <div class="flex items-center justify-between mb-2"><h2 class="text-sm font-semibold text-slate-700">PDF Attachments</h2></div>
-        <form method="POST" enctype="multipart/form-data" action="/clients/<?= $client['id'] ?>/attachments" class="bg-white border border-slate-200 rounded-lg p-4 flex gap-2 items-center">
-            <select name="type" class="border rounded px-2 py-1 text-sm"><option value="proposal">Proposal</option><option value="contract">Contract</option></select>
+        <form method="POST" enctype="multipart/form-data" action="/clients/<?= $client['id'] ?>/attachments" class="bg-white border border-slate-200 rounded-lg p-4 flex flex-wrap gap-2 items-center">
+            <select name="type" class="border rounded px-2 py-1 text-sm"><option value="proposal">Proposal</option><option value="contract">Contract</option><option value="agreement">Agreement</option></select>
+            <?php if (!empty($client['agreements'])): ?>
+                <select name="agreement_id" class="border rounded px-2 py-1 text-sm">
+                    <option value="">Not linked to an agreement</option>
+                    <?php foreach ($client['agreements'] as $ag): ?>
+                        <option value="<?= (int)$ag['id'] ?>"><?= e($ag['title']) ?></option>
+                    <?php endforeach ?>
+                </select>
+            <?php endif ?>
             <input type="file" name="attachment" accept="application/pdf" class="text-sm" required>
             <button class="px-3 py-1.5 bg-accent-600 text-white text-sm rounded">Upload PDF</button>
         </form>

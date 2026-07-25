@@ -42,13 +42,15 @@ class SettingsController
                  WHERE cs.id IS NULL OR cs.client_id IS NULL
                  ORDER BY ps.domain LIMIT 8"
             )->fetchAll(PDO::FETCH_COLUMN),
-            'last_error'       => $this->db->query("SELECT * FROM ploi_sync_log WHERE status = 'failed' ORDER BY started_at DESC LIMIT 1")->fetch() ?: null,
+            'last_error'       => $this->lastPloiError(),
         ];
 
         $fxSvc         = new ExchangeRateService($this->db);
         $exchangeRates = $fxSvc->getCurrentRates();
 
-        render('settings.index', compact('faCfg', 'connected', 'ploiCfg', 'ploiConnected', 'ploiStats', 'exchangeRates'), 'Settings');
+        $dataQualityIssues = DataQualityController::issueCount($this->db);
+
+        render('settings.index', compact('faCfg', 'connected', 'ploiCfg', 'ploiConnected', 'ploiStats', 'exchangeRates', 'dataQualityIssues'), 'Settings');
     }
 
     public function refreshExchangeRates(): void
@@ -79,19 +81,102 @@ class SettingsController
         $ploiCfg = $this->ploi->getConfig();
         $connected = $this->ploi->isConnected();
         $breadcrumbs = [['Settings', '/settings'], ['Ploi', null]];
-        $lastError = $this->db->query("SELECT * FROM ploi_sync_log WHERE status = 'failed' ORDER BY started_at DESC LIMIT 1")->fetch() ?: null;
-        render('settings.ploi', compact('ploiCfg', 'connected', 'breadcrumbs', 'lastError'), 'Ploi Settings');
+        $lastError = $this->lastPloiError();
+
+        $staleServers = $staleSites = $serverExclusions = [];
+        try {
+            $staleServers = $this->db->query("SELECT * FROM ploi_servers WHERE is_stale = 1 ORDER BY name")->fetchAll();
+            $staleSites = $this->db->query("SELECT * FROM ploi_sites WHERE is_stale = 1 ORDER BY domain")->fetchAll();
+            $serverExclusions = $this->db->query("SELECT * FROM ploi_server_exclusions ORDER BY created_at DESC")->fetchAll();
+        } catch (\Throwable) {}
+
+        render('settings.ploi', compact('ploiCfg', 'connected', 'breadcrumbs', 'lastError', 'staleServers', 'staleSites', 'serverExclusions'), 'Ploi Settings');
+    }
+
+    /**
+     * Latest undismissed sync failure since the last successful full sync.
+     * Older failures are considered resolved once a full sync completes.
+     */
+    private function lastPloiError(): ?array
+    {
+        try {
+            return $this->db->query(
+                "SELECT * FROM ploi_sync_log
+                 WHERE status = 'failed' AND COALESCE(dismissed, 0) = 0
+                   AND started_at >= COALESCE(
+                       (SELECT MAX(started_at) FROM ploi_sync_log
+                        WHERE sync_type = 'full' AND status = 'completed'), '1970-01-01')
+                 ORDER BY started_at DESC LIMIT 1"
+            )->fetch() ?: null;
+        } catch (\Throwable) {
+            return null;
+        }
     }
 
     public function savePloi(): void
     {
         $token = trim($_POST['api_token'] ?? '');
         if (!$token) {
-            flash('error', 'Ploi API token is required.');
+            if ($this->ploi->isConnected()) {
+                flash('success', 'Existing Ploi token unchanged.');
+            } else {
+                flash('error', 'Ploi API token is required.');
+            }
             redirect('/settings/ploi');
         }
         $this->ploi->saveToken($token);
         flash('success', 'Ploi token saved.');
+        redirect('/settings/ploi');
+    }
+
+    public function dismissPloiError(): void
+    {
+        try {
+            $this->db->exec("UPDATE ploi_sync_log SET dismissed = 1 WHERE status = 'failed' AND dismissed = 0");
+            flash('success', 'Sync error dismissed.');
+        } catch (\Throwable $e) {
+            flash('error', 'Failed to dismiss error: ' . $e->getMessage());
+        }
+        redirect('/settings/ploi');
+    }
+
+    public function purgeStalePloi(): void
+    {
+        try {
+            $sync = new PloiSync($this->db, $this->ploi);
+            $counts = $sync->purgeStale();
+            flash('success', "Purged {$counts['servers']} stale server(s) and {$counts['sites']} stale site(s).");
+        } catch (\Throwable $e) {
+            flash('error', 'Failed to purge stale records: ' . $e->getMessage());
+        }
+        redirect('/settings/ploi');
+    }
+
+    public function excludePloiServer(int $ploiId): void
+    {
+        try {
+            $name = null;
+            $stmt = $this->db->prepare("SELECT name FROM ploi_servers WHERE ploi_id = ? LIMIT 1");
+            $stmt->execute([$ploiId]);
+            $name = $stmt->fetchColumn() ?: null;
+            $this->db->prepare(
+                "INSERT OR IGNORE INTO ploi_server_exclusions (ploi_server_id, name, reason) VALUES (?, ?, 'Excluded from settings')"
+            )->execute([$ploiId, $name]);
+            flash('success', 'Server excluded from future Ploi syncs.');
+        } catch (\Throwable $e) {
+            flash('error', 'Failed to exclude server: ' . $e->getMessage());
+        }
+        redirect('/settings/ploi');
+    }
+
+    public function removePloiServerExclusion(int $id): void
+    {
+        try {
+            $this->db->prepare("DELETE FROM ploi_server_exclusions WHERE id = ?")->execute([$id]);
+            flash('success', 'Exclusion removed. Server will be included in future syncs.');
+        } catch (\Throwable $e) {
+            flash('error', 'Failed to remove exclusion: ' . $e->getMessage());
+        }
         redirect('/settings/ploi');
     }
 
@@ -292,6 +377,45 @@ class SettingsController
             flash('error', 'Failed to remove exclusion: ' . $e->getMessage());
         }
         redirect('/settings/ploi');
+    }
+
+    public function mcp(): void
+    {
+        $clients = $tokens = [];
+        try {
+            $clients = $this->db->query("
+                SELECT oc.*,
+                       (SELECT COUNT(*) FROM oauth_tokens ot WHERE ot.client_id = oc.client_id AND ot.token_type = 'refresh' AND ot.revoked = 0 AND ot.expires_at > datetime('now')) AS active_grants,
+                       (SELECT MAX(ot.last_used_at) FROM oauth_tokens ot WHERE ot.client_id = oc.client_id) AS last_used_at
+                FROM oauth_clients oc ORDER BY oc.created_at DESC
+            ")->fetchAll();
+            $tokens = $this->db->query("
+                SELECT family_id, client_id, MIN(created_at) AS granted_at, MAX(last_used_at) AS last_used_at,
+                       SUM(CASE WHEN revoked = 0 AND expires_at > datetime('now') THEN 1 ELSE 0 END) AS live_tokens
+                FROM oauth_tokens GROUP BY family_id, client_id
+                HAVING live_tokens > 0 ORDER BY granted_at DESC
+            ")->fetchAll();
+        } catch (\Throwable) {}
+
+        $mcpUrl = appUrl() . '/mcp';
+        $breadcrumbs = [['Settings', '/settings'], ['MCP Access', null]];
+        render('settings.mcp', compact('clients', 'tokens', 'mcpUrl', 'breadcrumbs'), 'MCP Access');
+    }
+
+    public function revokeMcpClient(int $id): void
+    {
+        if (!csrfCheck()) { flash('error', 'Invalid form token — please try again.'); redirect('/settings/mcp'); }
+        try {
+            $stmt = $this->db->prepare("SELECT client_id, client_name FROM oauth_clients WHERE id = ?");
+            $stmt->execute([$id]);
+            if ($row = $stmt->fetch()) {
+                (new \CoyshCRM\Services\OAuthService($this->db))->revokeClient($row['client_id']);
+                flash('success', "Revoked access for '" . ($row['client_name'] ?: $row['client_id']) . "'.");
+            }
+        } catch (\Throwable $e) {
+            flash('error', 'Failed to revoke: ' . $e->getMessage());
+        }
+        redirect('/settings/mcp');
     }
 
     private function buildRedirectUri(): string

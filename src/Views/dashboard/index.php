@@ -79,7 +79,7 @@ function dashDiff(float $a, float $b, bool $lowerIsBetter = false): array
                             </td>
                             <td class="px-4 py-2.5 text-right tabular-nums" data-value="<?= round($row['mrr'], 2) ?>"><?= money($row['mrr']) ?></td>
                             <td class="px-4 py-2.5 text-right tabular-nums text-slate-500" data-value="<?= round($row['recurringCosts'] ?? 0, 2) ?>"><?= money($row['recurringCosts'] ?? 0) ?></td>
-                            <td class="px-4 py-2.5 text-right tabular-nums text-slate-500" data-value="<?= round($row['directExpenses'], 2) ?>"><?= money($row['directExpenses'] + $row['domainCost']) ?></td>
+                            <td class="px-4 py-2.5 text-right tabular-nums text-slate-500" data-value="<?= round($row['directExpenses'] + $row['domainCost'], 2) ?>"><?= money($row['directExpenses'] + $row['domainCost']) ?></td>
                             <td class="px-4 py-2.5 text-right tabular-nums font-medium <?= $pColor ?>" data-value="<?= round($rowProfit, 2) ?>"><?= money($rowProfit) ?></td>
                             <td class="px-4 py-2.5 text-right tabular-nums <?= $mColor ?>" data-value="<?= round($margin, 1) ?>"><?= number_format($margin, 1) ?>%</td>
                         </tr>
@@ -96,9 +96,7 @@ function dashDiff(float $a, float $b, bool $lowerIsBetter = false): array
     <div class="bg-white border border-slate-200 rounded-lg overflow-hidden">
         <div class="px-5 py-3 border-b border-slate-200 flex items-center justify-between">
             <h2 class="text-sm font-semibold text-slate-700">Upcoming Renewals</h2>
-            <?php if ($totalRenewals > 5): ?>
-                <a href="/insights?section=renewals" class="text-xs text-accent-600 hover:underline">View all <?= $totalRenewals ?> →</a>
-            <?php endif ?>
+            <a href="/renewals" class="text-xs text-accent-600 hover:underline">View all<?= $totalRenewals > 5 ? " $totalRenewals" : '' ?> →</a>
         </div>
         <?php if ($upcomingRenewals): ?>
         <ul class="divide-y divide-slate-100">
@@ -112,12 +110,14 @@ function dashDiff(float $a, float $b, bool $lowerIsBetter = false): array
                     'domain'            => 'bg-blue-100 text-blue-700',
                     'recurring_cost'    => 'bg-purple-100 text-purple-700',
                     'recurring_invoice' => 'bg-green-100 text-green-700',
+                    'agreement'         => 'bg-amber-100 text-amber-700',
                     default             => 'bg-slate-100 text-slate-600',
                 };
                 $typeLabel = match($r['type']) {
                     'domain'            => 'Domain',
                     'recurring_cost'    => 'Recurring',
                     'recurring_invoice' => 'Invoice',
+                    'agreement'         => 'Agreement',
                     default             => $r['type'],
                 };
             ?>
@@ -223,13 +223,6 @@ function dashDiff(float $a, float $b, bool $lowerIsBetter = false): array
             </thead>
             <tbody class="divide-y divide-slate-100">
                 <?php
-                $flagLabels = [
-                    'loss_making'       => 'Loss-making',
-                    'no_retainer'       => 'No retainer',
-                    'no_recent_invoice' => 'No recent invoice',
-                    'overdue_invoices'  => 'Overdue invoices',
-                    'incomplete_setup'  => 'Incomplete setup',
-                ];
                 foreach ($healthRows as $row):
                     $dotCls = match($row['status']) {
                         'healthy'   => 'bg-green-500',
@@ -260,7 +253,7 @@ function dashDiff(float $a, float $b, bool $lowerIsBetter = false): array
                     <td class="px-4 py-2.5 text-xs text-slate-500">
                         <?php if ($row['flags']): ?>
                             <?php foreach ($row['flags'] as $flag): ?>
-                                <span class="inline-block mr-1 px-1.5 py-0.5 rounded bg-slate-100 text-slate-600"><?= $flagLabels[$flag] ?? $flag ?></span>
+                                <span class="inline-block mr-1 px-1.5 py-0.5 rounded bg-slate-100 text-slate-600"><?= e(healthFlagLabel($flag)) ?></span>
                             <?php endforeach ?>
                         <?php else: ?>
                             <span class="text-green-600">All checks passing</span>

@@ -345,6 +345,54 @@ function insightsDiff(float $a, float $b, bool $lowerIsBetter = false): array
             </div>
         </div>
         <?php endif ?>
+
+        <!-- Income category breakdown -->
+        <?php if (!empty($categoryBreakdown)): ?>
+        <?php $catMax = max(array_map(fn($r) => (float)$r['this_period'], $categoryBreakdown)) ?: 1; ?>
+        <div class="bg-white border border-slate-200 rounded-lg overflow-hidden mt-6">
+            <div class="px-5 py-3 border-b border-slate-200">
+                <h3 class="text-sm font-semibold text-slate-700">Revenue by Income Category</h3>
+            </div>
+            <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+                <thead class="bg-slate-50 text-xs text-slate-500 uppercase tracking-wide">
+                    <tr>
+                        <th class="px-4 py-2.5 text-left">Category</th>
+                        <th class="px-4 py-2.5 text-left w-1/3"></th>
+                        <th class="px-4 py-2.5 text-right"><?= e($labelThis) ?></th>
+                        <th class="px-4 py-2.5 text-right"><?= e($labelLast) ?></th>
+                        <th class="px-4 py-2.5 text-right">Change</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-100">
+                    <?php foreach ($categoryBreakdown as $cat):
+                        $t = (float)$cat['this_period'];
+                        $l = (float)$cat['last_period'];
+                        $pct = $l > 0 ? (($t - $l) / $l) * 100 : null;
+                        $chgCls = $pct === null ? 'text-slate-400' : ($pct >= 0 ? 'text-green-600' : 'text-red-600');
+                        $barPct = round($t / $catMax * 100);
+                    ?>
+                    <tr class="hover:bg-slate-50">
+                        <td class="px-4 py-2.5 text-slate-700"><?= e($cat['category']) ?>
+                            <span class="text-xs text-slate-400">(<?= (int)$cat['invoice_count'] ?>)</span>
+                        </td>
+                        <td class="px-4 py-2.5">
+                            <div class="w-full bg-slate-100 rounded-full h-2">
+                                <div class="h-2 rounded-full bg-accent-500" style="width: <?= $barPct ?>%"></div>
+                            </div>
+                        </td>
+                        <td class="px-4 py-2.5 text-right tabular-nums font-medium"><?= money($t) ?></td>
+                        <td class="px-4 py-2.5 text-right tabular-nums text-slate-500"><?= money($l) ?></td>
+                        <td class="px-4 py-2.5 text-right tabular-nums text-xs <?= $chgCls ?>">
+                            <?= $pct === null ? ($t > 0 ? 'New' : '—') : (($pct >= 0 ? '▲ ' : '▼ ') . number_format(abs($pct), 1) . '%') ?>
+                        </td>
+                    </tr>
+                    <?php endforeach ?>
+                </tbody>
+            </table>
+            </div>
+        </div>
+        <?php endif ?>
     </section>
 
     <!-- ── Yearly Profit / Loss ──────────────────────────────────────────── -->
@@ -634,13 +682,6 @@ function insightsDiff(float $a, float $b, bool $lowerIsBetter = false): array
         </div>
 
         <?php
-        $flagLabels = [
-            'loss_making'       => 'Loss-making',
-            'no_retainer'       => 'No retainer',
-            'no_recent_invoice' => 'No recent invoice',
-            'overdue_invoices'  => 'Overdue invoices',
-            'incomplete_setup'  => 'Incomplete setup',
-        ];
         $filtered = array_filter($healthRows, fn($r) => $healthStatusFilter === 'all' || $r['status'] === $healthStatusFilter);
         ?>
 
@@ -686,7 +727,7 @@ function insightsDiff(float $a, float $b, bool $lowerIsBetter = false): array
                         <td class="px-4 py-2.5 text-slate-500 text-xs">
                             <?php if ($row['flags']): ?>
                                 <?php foreach ($row['flags'] as $flag): ?>
-                                    <span class="inline-block mr-1.5 mb-0.5 px-1.5 py-0.5 rounded bg-slate-100 text-slate-600"><?= $flagLabels[$flag] ?? $flag ?></span>
+                                    <span class="inline-block mr-1.5 mb-0.5 px-1.5 py-0.5 rounded bg-slate-100 text-slate-600"><?= e(healthFlagLabel($flag)) ?></span>
                                 <?php endforeach ?>
                             <?php else: ?>
                                 <span class="text-green-600">All checks passing</span>

@@ -9,7 +9,8 @@ class FreeAgentRecurringInvoice extends Model
     protected string $table = 'freeagent_recurring_invoices';
 
     /**
-     * Convert a recurring invoice's total_value to a monthly equivalent.
+     * Convert a recurring invoice value to a monthly equivalent.
+     * Pass the net value for revenue figures (see monthlySql()).
      */
     public static function toMonthly(float $totalValue, string $frequency): float
     {
@@ -33,13 +34,16 @@ class FreeAgentRecurringInvoice extends Model
     }
 
     /**
-     * SQL CASE expression that normalises total_value to a monthly figure.
-     * Accepts a table alias prefix (e.g. 'fri' → 'fri.total_value', 'fri.frequency').
+     * SQL CASE expression that normalises the invoice value to a monthly figure.
+     * Uses the net (ex-VAT) value for revenue, falling back to total_value for
+     * legacy rows synced before net_value existed.
+     * Accepts a table alias prefix (e.g. 'fri' → 'fri.net_value', 'fri.frequency').
      */
     public static function monthlySql(string $alias = ''): string
     {
-        $tv  = $alias ? "{$alias}.total_value" : 'total_value';
-        $frq = $alias ? "{$alias}.frequency"   : 'frequency';
+        $p   = $alias ? "{$alias}." : '';
+        $tv  = "COALESCE({$p}net_value, {$p}total_value)";
+        $frq = "{$p}frequency";
         return "CASE {$frq}
             WHEN 'Weekly'      THEN {$tv} * 52 / 12
             WHEN 'Two Weekly'  THEN {$tv} * 26 / 12

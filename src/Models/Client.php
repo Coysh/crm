@@ -46,7 +46,7 @@ class Client extends Model
              WHERE fri.client_id = c.id AND fri.recurring_status = 'Active') AS mrr,
             (CASE WHEN EXISTS(SELECT 1 FROM freeagent_recurring_invoices fri
                 WHERE fri.client_id = c.id AND fri.recurring_status = 'Active') THEN 1 ELSE 0 END) AS has_recurring,
-            (SELECT COALESCE(SUM(fi.total_value), 0)
+            (SELECT COALESCE(SUM(COALESCE(fi.net_value, fi.total_value)), 0)
              FROM freeagent_invoices fi WHERE fi.client_id = c.id
                AND COALESCE(fi.status_override, fi.status) IN ('paid','sent','overdue')) AS total_invoiced,
             (SELECT COALESCE(SUM(fi.total_value), 0)
@@ -393,6 +393,107 @@ class Client extends Model
         return compact('mrr', 'domainCost', 'directExpenses', 'recurringCosts', 'totalCosts', 'profit', 'margin');
     }
 
+    /**
+     * P&L for every active client in a handful of grouped queries instead of
+     * ~7 queries per client. Returns client_id => same shape as getPL().
+     */
+    public function getPLAll(): array
+    {
+        $clientIds = $this->query("SELECT id FROM clients WHERE status = 'active'")->fetchAll(\PDO::FETCH_COLUMN);
+        if (!$clientIds) return [];
+
+        $zero = ['mrr' => 0.0, 'domainCost' => 0.0, 'directExpenses' => 0.0, 'recurringCosts' => 0.0];
+        $pl = array_fill_keys(array_map('intval', $clientIds), $zero);
+
+        $mrrSql = FreeAgentRecurringInvoice::monthlySql();
+        foreach ($this->query(
+            "SELECT client_id, COALESCE(SUM($mrrSql), 0) AS mrr
+             FROM freeagent_recurring_invoices
+             WHERE recurring_status = 'Active' AND client_id IS NOT NULL
+             GROUP BY client_id"
+        )->fetchAll() as $r) {
+            if (isset($pl[(int)$r['client_id']])) $pl[(int)$r['client_id']]['mrr'] = (float)$r['mrr'];
+        }
+
+        // Domains — FX-converted per row, matching getMonthlyDomainCost()
+        $fx = $this->hasCurrencyColumn() ? $this->fx() : null;
+        foreach ($this->query(
+            "SELECT client_id, annual_cost / 12.0 AS monthly, COALESCE(currency, 'GBP') AS currency
+             FROM domains WHERE client_id IS NOT NULL AND annual_cost IS NOT NULL"
+        )->fetchAll() as $r) {
+            $cid = (int)$r['client_id'];
+            if (!isset($pl[$cid])) continue;
+            $pl[$cid]['domainCost'] += $fx ? $fx->convertToGBP((float)$r['monthly'], $r['currency']) : (float)$r['monthly'];
+        }
+
+        foreach ($this->query(
+            "SELECT client_id, COALESCE(SUM(CASE billing_cycle WHEN 'monthly' THEN amount WHEN 'annual' THEN amount/12 WHEN 'one_off' THEN 0 ELSE amount END), 0) AS monthly
+             FROM expenses WHERE client_id IS NOT NULL AND ignore_from_stats = 0
+             GROUP BY client_id"
+        )->fetchAll() as $r) {
+            if (isset($pl[(int)$r['client_id']])) $pl[(int)$r['client_id']]['directExpenses'] = (float)$r['monthly'];
+        }
+
+        // Recurring cost shares — the same three apportionment paths as
+        // getMonthlyRecurringCosts(), grouped by client.
+        $currCol      = $this->hasCurrencyColumn() ? ", COALESCE(rc.currency, 'GBP') AS currency" : ", 'GBP' AS currency";
+        $serverFilter = $this->hasServerIdColumn() ? 'AND rc.server_id IS NULL' : '';
+
+        $rcRows = [];
+        if ($this->hasServerIdColumn()) {
+            $rcRows = array_merge($rcRows, $this->query("
+                SELECT cs.client_id,
+                       (CASE rc.billing_cycle WHEN 'monthly' THEN rc.amount ELSE rc.amount / 12.0 END)
+                       / MAX(1, (SELECT COUNT(DISTINCT cs2.client_id) FROM client_sites cs2 WHERE cs2.server_id = rc.server_id)) AS monthly_share
+                       {$currCol}
+                FROM recurring_costs rc
+                JOIN (SELECT DISTINCT server_id, client_id FROM client_sites WHERE client_id IS NOT NULL) cs
+                  ON cs.server_id = rc.server_id
+                WHERE rc.is_active = 1 AND rc.server_id IS NOT NULL
+            ")->fetchAll());
+        }
+        $rcRows = array_merge($rcRows, $this->query("
+            SELECT rcc.client_id,
+                   (CASE rc.billing_cycle WHEN 'monthly' THEN rc.amount ELSE rc.amount / 12.0 END)
+                   / MAX(1, (SELECT COUNT(DISTINCT c2.client_id) FROM recurring_cost_clients c2
+                             WHERE c2.recurring_cost_id = rc.id AND c2.client_id IS NOT NULL)) AS monthly_share
+                   {$currCol}
+            FROM recurring_costs rc
+            JOIN (SELECT DISTINCT recurring_cost_id, client_id FROM recurring_cost_clients WHERE client_id IS NOT NULL) rcc
+              ON rcc.recurring_cost_id = rc.id
+            WHERE rc.is_active = 1 $serverFilter
+        ")->fetchAll());
+        $rcRows = array_merge($rcRows, $this->query("
+            SELECT cs.client_id,
+                   (CASE rc.billing_cycle WHEN 'monthly' THEN rc.amount ELSE rc.amount / 12.0 END)
+                   / MAX(1, (SELECT COUNT(*) FROM recurring_cost_clients c2
+                             WHERE c2.recurring_cost_id = rc.id AND c2.client_site_id IS NOT NULL))
+                   * COUNT(*) AS monthly_share
+                   {$currCol}
+            FROM recurring_costs rc
+            JOIN recurring_cost_clients rcc ON rcc.recurring_cost_id = rc.id AND rcc.client_site_id IS NOT NULL
+            JOIN client_sites cs ON cs.id = rcc.client_site_id AND cs.client_id IS NOT NULL
+            WHERE rc.is_active = 1 $serverFilter
+            GROUP BY rc.id, cs.client_id
+        ")->fetchAll());
+
+        foreach ($rcRows as $r) {
+            $cid = (int)$r['client_id'];
+            if (!isset($pl[$cid])) continue;
+            $share = (float)$r['monthly_share'];
+            $pl[$cid]['recurringCosts'] += $fx ? $fx->convertToGBP($share, $r['currency'] ?? 'GBP') : $share;
+        }
+
+        foreach ($pl as &$row) {
+            $row['totalCosts'] = $row['domainCost'] + $row['directExpenses'] + $row['recurringCosts'];
+            $row['profit']     = $row['mrr'] - $row['totalCosts'];
+            $row['margin']     = $row['mrr'] > 0 ? ($row['profit'] / $row['mrr']) * 100 : 0;
+        }
+        unset($row);
+
+        return $pl;
+    }
+
     public function getHealth(int $clientId): array
     {
         $today      = date('Y-m-d');
@@ -441,9 +542,26 @@ class Client extends Model
             if (!$hasSites || !$hasDomains) $flags[] = 'incomplete_setup';
         }
 
-        // Support-only and consultancy-only clients should have agreement notes
+        // Structured agreements: renewal overdue / hours exhausted apply to everyone;
+        // support/consultancy clients are flagged when they have neither an active
+        // agreement nor legacy agreement notes.
+        $agreements = [];
+        try {
+            $agreements = (new Agreement($this->db))->findByClient($clientId);
+        } catch (\Throwable) {}
+        $activeAgreements = array_filter($agreements, fn($a) => $a['status'] === 'active');
+
         if (in_array($clientType, ['support_only', 'consultancy_only'])) {
-            if (empty($client['agreement_notes'])) $flags[] = 'no_agreement';
+            if (!$activeAgreements && empty($client['agreement_notes'])) $flags[] = 'no_agreement';
+        }
+        $today = date('Y-m-d');
+        foreach ($activeAgreements as $a) {
+            if (!empty($a['renewal_date']) && $a['renewal_date'] < $today && !in_array('agreement_renewal_overdue', $flags)) {
+                $flags[] = 'agreement_renewal_overdue';
+            }
+            if ($a['hours_remaining'] !== null && $a['hours_remaining'] <= 0 && !in_array('hours_exhausted', $flags)) {
+                $flags[] = 'hours_exhausted';
+            }
         }
 
         $count  = count($flags);
@@ -456,7 +574,11 @@ class Client extends Model
         return ['status' => $status, 'flags' => $flags, 'pl' => $pl];
     }
 
-    public function getHealthAll(): array
+    /**
+     * @param array|null $plByClient Optional precomputed getPLAll() map to avoid
+     *                               recomputing the P&L per client.
+     */
+    public function getHealthAll(?array $plByClient = null): array
     {
         $thirtyDaysAgo = date('Y-m-d', strtotime('-30 days'));
         $twelveMonAgo  = date('Y-m-d', strtotime('-12 months'));
@@ -505,13 +627,25 @@ class Client extends Model
         )->fetchAll(\PDO::FETCH_COLUMN);
         $domainSet = array_flip($domainIds);
 
+        // Aggregate: active structured agreements (with usage for hours flags)
+        $agreementSet = $renewalOverdueSet = $hoursExhaustedSet = [];
+        try {
+            $today = date('Y-m-d');
+            foreach ((new Agreement($this->db))->findAllWithClient('active') as $a) {
+                $acid = (int)$a['client_id'];
+                $agreementSet[$acid] = true;
+                if (!empty($a['renewal_date']) && $a['renewal_date'] < $today) $renewalOverdueSet[$acid] = true;
+                if ($a['hours_remaining'] !== null && $a['hours_remaining'] <= 0) $hoursExhaustedSet[$acid] = true;
+            }
+        } catch (\Throwable) {}
+
         $result = [];
         foreach ($activeClients as $row) {
             $cid        = (int)$row['id'];
             $clientType = $row['client_type'] ?? 'managed';
             $flags      = [];
 
-            $pl = $this->getPL($cid);
+            $pl = $plByClient[$cid] ?? $this->getPL($cid);
             if ($pl['profit'] < 0) $flags[] = 'loss_making';
 
             if ($clientType !== 'consultancy_only' && !isset($retainerSet[$cid])) $flags[] = 'no_retainer';
@@ -522,9 +656,12 @@ class Client extends Model
                 $flags[] = 'incomplete_setup';
             }
 
-            if (in_array($clientType, ['support_only', 'consultancy_only']) && empty($row['agreement_notes'])) {
+            if (in_array($clientType, ['support_only', 'consultancy_only'])
+                && !isset($agreementSet[$cid]) && empty($row['agreement_notes'])) {
                 $flags[] = 'no_agreement';
             }
+            if (isset($renewalOverdueSet[$cid])) $flags[] = 'agreement_renewal_overdue';
+            if (isset($hoursExhaustedSet[$cid])) $flags[] = 'hours_exhausted';
 
             $count  = count($flags);
             $status = match(true) {
@@ -543,7 +680,7 @@ class Client extends Model
         $totalInvoiced = 0.0;
         try {
             $totalInvoiced = (float)$this->query(
-                "SELECT COALESCE(SUM(total_value), 0) FROM freeagent_invoices WHERE client_id = ? AND COALESCE(status_override, status) IN ('paid','sent','overdue')",
+                "SELECT COALESCE(SUM(COALESCE(net_value, total_value)), 0) FROM freeagent_invoices WHERE client_id = ? AND COALESCE(status_override, status) IN ('paid','sent','overdue')",
                 [$clientId]
             )->fetchColumn();
         } catch (\Throwable) {}
@@ -552,7 +689,7 @@ class Client extends Model
         $totalExpenses = 0.0;
         try {
             $totalExpenses = (float)$this->query(
-                "SELECT COALESCE(SUM(amount), 0) FROM expenses WHERE client_id = ? AND COALESCE(ignore_from_pl, 0) = 0",
+                "SELECT COALESCE(SUM(amount), 0) FROM expenses WHERE client_id = ? AND COALESCE(ignore_from_stats, 0) = 0",
                 [$clientId]
             )->fetchColumn();
         } catch (\Throwable) {}
@@ -570,6 +707,15 @@ class Client extends Model
         $client['projects'] = $this->query("SELECT * FROM projects WHERE client_id = ? ORDER BY created_at DESC", [$id])->fetchAll();
         $client['expenses'] = $this->query("SELECT e.*, s.name AS server_name, p.name AS project_name FROM expenses e LEFT JOIN servers s ON s.id = e.server_id LEFT JOIN projects p ON p.id = e.project_id WHERE e.client_id = ? ORDER BY e.date DESC", [$id])->fetchAll();
         $client['attachments'] = $this->query("SELECT * FROM client_attachments WHERE client_id = ? ORDER BY uploaded_at DESC", [$id])->fetchAll();
+        $client['agreements'] = [];
+        try {
+            $agreementModel = new Agreement($this->db);
+            $client['agreements'] = array_map(function ($a) use ($agreementModel) {
+                $a['work_log']    = $agreementModel->workLog((int)$a['id'], 20);
+                $a['attachments'] = $agreementModel->attachments((int)$a['id']);
+                return $a;
+            }, $agreementModel->findByClient($id));
+        } catch (\Throwable) {}
         $client['pl']          = $this->getPL($id);
         $client['pl_recurring'] = $this->getRecurringCostsBreakdown($id);
         $client['pl_alltime']  = $this->getAllTimePL($id);

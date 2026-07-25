@@ -63,6 +63,9 @@ try {
         PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
     ]);
     $db->exec('PRAGMA foreign_keys = ON');
+    // SQLite is single-writer: wait instead of failing when a sync script or
+    // the MCP endpoint holds the write lock.
+    $db->exec('PRAGMA busy_timeout = 5000');
 } catch (PDOException $e) {
     die('Database connection failed: ' . $e->getMessage());
 }
@@ -298,6 +301,45 @@ function formatDate(?string $date): string
 {
     if (!$date) return '—';
     return date('j M Y', strtotime($date));
+}
+
+/**
+ * Canonical base URL of the app (no trailing slash). Set APP_URL in the
+ * server environment (e.g. https://crm.coysh.digital) — required for a
+ * stable OAuth issuer. Falls back to the request host.
+ */
+function appUrl(): string
+{
+    static $url = null;
+    if ($url !== null) return $url;
+    $env = $_ENV['APP_URL'] ?? getenv('APP_URL');
+    if ($env) {
+        return $url = rtrim($env, '/');
+    }
+    $isHttps = (($_SERVER['HTTPS'] ?? '') === 'on')
+        || (($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https')
+        || (($_SERVER['SERVER_PORT'] ?? '') === '443');
+    $scheme = $isHttps ? 'https' : 'http';
+    $host   = $_SERVER['HTTP_HOST'] ?? 'localhost:8080';
+    return $url = "$scheme://$host";
+}
+
+/**
+ * Human-readable label for a client-health flag.
+ */
+function healthFlagLabel(string $flag): string
+{
+    return match($flag) {
+        'loss_making'               => 'Loss-making',
+        'no_retainer'               => 'No retainer',
+        'no_recent_invoice'         => 'No recent invoice',
+        'overdue_invoices'          => 'Overdue invoices',
+        'incomplete_setup'          => 'Incomplete setup',
+        'no_agreement'              => 'No agreement',
+        'agreement_renewal_overdue' => 'Agreement renewal overdue',
+        'hours_exhausted'           => 'SLA hours exhausted',
+        default                     => ucfirst(str_replace('_', ' ', $flag)),
+    };
 }
 
 /**

@@ -76,80 +76,19 @@ class DashboardController
 
         $serverCount = (int)$this->db->query("SELECT COUNT(*) FROM servers")->fetchColumn();
 
-        // ── Per-client P&L ────────────────────────────────────────────────
+        // ── Per-client P&L (single batched pass) ─────────────────────────
 
         $activeClients = $clientModel->findAll(['status' => 'active'], 'name');
+        $plAll = $clientModel->getPLAll();
         $clientPL = [];
         foreach ($activeClients as $client) {
-            $pl = $clientModel->getPL((int)$client['id']);
+            $pl = $plAll[(int)$client['id']] ?? $clientModel->getPL((int)$client['id']);
             $clientPL[] = array_merge($client, $pl);
         }
 
         // ── Upcoming renewals (30 days overdue → 90 days ahead) ──────────
 
-        $today   = date('Y-m-d');
-        $cutoff  = date('Y-m-d', strtotime('-30 days'));
-        $horizon = date('Y-m-d', strtotime('+90 days'));
-
-        $stmt = $this->db->prepare("
-            SELECT 'domain' AS type, d.domain AS name, d.renewal_date AS due_date,
-                   d.annual_cost AS amount, 'annual' AS billing_cycle,
-                   c.name AS client_name, c.id AS client_id,
-                   '/clients/' || c.id AS detail_url
-            FROM domains d LEFT JOIN clients c ON c.id = d.client_id
-            WHERE d.renewal_date IS NOT NULL
-              AND d.renewal_date BETWEEN ? AND ?
-
-            UNION ALL
-
-            SELECT 'recurring_cost' AS type, rc.name, rc.renewal_date AS due_date,
-                   rc.amount, rc.billing_cycle,
-                   NULL AS client_name, NULL AS client_id,
-                   '/expenses/recurring/' || rc.id || '/edit' AS detail_url
-            FROM recurring_costs rc
-            WHERE rc.renewal_date IS NOT NULL AND rc.is_active = 1
-              AND rc.renewal_date BETWEEN ? AND ?
-
-            UNION ALL
-
-            SELECT 'recurring_invoice' AS type, COALESCE(fri.reference, 'Recurring Invoice') AS name,
-                   fri.next_recurs_on AS due_date,
-                   fri.total_value AS amount, fri.frequency AS billing_cycle,
-                   c.name AS client_name, c.id AS client_id,
-                   '/clients/' || c.id AS detail_url
-            FROM freeagent_recurring_invoices fri
-            LEFT JOIN clients c ON c.id = fri.client_id
-            WHERE fri.next_recurs_on IS NOT NULL AND fri.recurring_status = 'Active'
-              AND fri.next_recurs_on BETWEEN ? AND ?
-
-            ORDER BY due_date ASC
-        ");
-        $stmt->execute([$cutoff, $horizon, $cutoff, $horizon, $cutoff, $horizon]);
-        $allRenewals = $stmt->fetchAll();
-
-        // Annotate with relative time and urgency
-        $todayTs = strtotime($today);
-        foreach ($allRenewals as &$r) {
-            $dueTs    = strtotime($r['due_date']);
-            $diffDays = (int)round(($dueTs - $todayTs) / 86400);
-            $r['days_diff'] = $diffDays;
-            if ($diffDays < 0) {
-                $r['relative'] = 'Overdue';
-                $r['urgency']  = 'red';
-            } elseif ($diffDays <= 7) {
-                $r['relative'] = $diffDays === 0 ? 'Today' : ($diffDays === 1 ? 'Tomorrow' : "{$diffDays} days");
-                $r['urgency']  = 'red';
-            } elseif ($diffDays <= 30) {
-                $weeks = max(1, (int)round($diffDays / 7));
-                $r['relative'] = $weeks === 1 ? "{$diffDays} days" : "{$weeks} weeks";
-                $r['urgency']  = 'amber';
-            } else {
-                $months = max(1, (int)round($diffDays / 30));
-                $r['relative'] = "{$months} month" . ($months > 1 ? 's' : '');
-                $r['urgency']  = 'default';
-            }
-        }
-        unset($r);
+        $allRenewals = (new \CoyshCRM\Services\Renewals($this->db))->fetch(90);
 
         $totalRenewals    = count($allRenewals);
         $upcomingRenewals = array_slice($allRenewals, 0, 5);
@@ -200,7 +139,7 @@ class DashboardController
 
         // ── Client health ─────────────────────────────────────────────────
 
-        $healthAll    = $clientModel->getHealthAll();
+        $healthAll    = $clientModel->getHealthAll($plAll);
         $healthCounts = ['healthy' => 0, 'attention' => 0, 'at_risk' => 0];
         $healthRows   = [];
 
@@ -228,9 +167,9 @@ class DashboardController
     {
         try {
             $stmt = $this->db->prepare("
-                SELECT COALESCE(SUM(total_value), 0) FROM freeagent_invoices
+                SELECT COALESCE(SUM(COALESCE(net_value, total_value)), 0) FROM freeagent_invoices
                 WHERE dated_on BETWEEN ? AND ?
-                  AND status IN ('paid', 'sent', 'overdue')
+                  AND COALESCE(status_override, status) IN ('paid', 'sent', 'overdue')
             ");
             $stmt->execute([$start, $end]);
             return (float)$stmt->fetchColumn();
@@ -273,7 +212,7 @@ class DashboardController
             $stmt = $this->db->prepare("
                 SELECT COUNT(DISTINCT client_id) FROM freeagent_invoices
                 WHERE dated_on BETWEEN ? AND ?
-                  AND status IN ('paid','sent','overdue')
+                  AND COALESCE(status_override, status) IN ('paid','sent','overdue')
                   AND client_id IS NOT NULL
             ");
             $stmt->execute([$start, $end]);
