@@ -131,6 +131,32 @@ Auth is OAuth 2.1 (`OAuthController` + `Services\OAuthService`): discovery at `/
 
 Deployment notes: set `APP_URL`; ensure the web server doesn't intercept `/.well-known/` or strip the `Authorization` header.
 
+## Deployment
+
+Production runs straight from a `git pull` — **there is no build step on the server**, and
+Node is not required there. Everything the browser needs is committed:
+`public/css/app.css` (compiled Tailwind), `public/js/*.min.js` (vendored Chart.js, Quill,
+qrcode). Build CSS locally and commit the result; see the Tailwind commands above.
+
+Deploy script should be exactly:
+
+```bash
+git pull origin main
+php scripts/migrate.php     # idempotent — safe on every deploy
+```
+
+**Do not run `npx tailwindcss` on the server.** Rebuilding `public/css/app.css` there
+leaves the tracked file locally modified, and the next deploy that touches it aborts with
+*"Your local changes to the following files would be overwritten by merge"*. If that has
+already happened, discard the server-side copy once — the committed file is authoritative:
+
+```bash
+git checkout -- public/css/app.css   # or: git reset --hard HEAD
+git pull origin main
+```
+
+Only `data/` (DB + `app.key`) should ever differ on the server; those are gitignored.
+
 ## Design Guidelines
 
 - Slate/gray Tailwind palette with a single accent colour
