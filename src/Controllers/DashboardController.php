@@ -150,7 +150,10 @@ class DashboardController
             $healthRows[] = array_merge($c, $h);
         }
 
+        $includeCharts = true;
+
         render('dashboard.index', compact(
+            'includeCharts',
             'mrr', 'pipelineMrr', 'totalCosts', 'profit', 'activeClientCount', 'serverCount',
             'clientPL',
             'upcomingRenewals', 'totalRenewals',

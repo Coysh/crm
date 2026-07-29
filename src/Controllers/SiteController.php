@@ -210,6 +210,54 @@ class SiteController
         redirect('/sites');
     }
 
+    /**
+     * Bulk-reassign sites to a different CRM server. Needed when sites are
+     * moved between servers in Ploi: the Ploi sync repoints its own mirror
+     * table, but client_sites.server_id (which drives the sites/servers views
+     * and server-linked cost apportionment) is not corrected automatically.
+     */
+    public function bulkUpdateServer(): void
+    {
+        if (!csrfCheck()) {
+            flash('error', 'Your session expired. Please try again.');
+            redirect('/sites');
+        }
+
+        $ids = array_values(array_unique(array_filter(
+            array_map('intval', (array)($_POST['site_ids'] ?? []))
+        )));
+        $back = $_POST['return_to'] ?? '/sites';
+        if (!str_starts_with($back, '/')) $back = '/sites';
+
+        if (!$ids) {
+            flash('error', 'No sites selected.');
+            redirect($back);
+        }
+
+        // Empty string = detach from any server (external hosting).
+        $raw      = $_POST['server_id'] ?? '';
+        $serverId = $raw !== '' ? (int)$raw : null;
+
+        $serverName = 'no server';
+        if ($serverId !== null) {
+            $stmt = $this->db->prepare("SELECT name FROM servers WHERE id = ? LIMIT 1");
+            $stmt->execute([$serverId]);
+            $serverName = $stmt->fetchColumn() ?: null;
+            if (!$serverName) {
+                flash('error', 'That server no longer exists.');
+                redirect($back);
+            }
+        }
+
+        $in   = implode(',', array_fill(0, count($ids), '?'));
+        $stmt = $this->db->prepare("UPDATE client_sites SET server_id = ? WHERE id IN ($in)");
+        $stmt->execute([$serverId, ...$ids]);
+        $count = $stmt->rowCount();
+
+        flash('success', "$count site" . ($count !== 1 ? 's' : '') . " moved to " . $serverName . '.');
+        redirect($back);
+    }
+
     public function updateClient(int $id): void
     {
         $clientId = $_POST['client_id'] !== '' ? (int)$_POST['client_id'] : null;

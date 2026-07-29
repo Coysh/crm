@@ -28,10 +28,10 @@ php scripts/cloudflare-sync.php
 php scripts/exchange-rates-sync.php
 
 # Build Tailwind CSS (dev, with watch)
-npx tailwindcss -i public/css/app.css -o public/css/app.css --watch
+npx tailwindcss -i src/css/app.css -o public/css/app.css --watch
 
 # Build Tailwind CSS (production)
-npx tailwindcss -i public/css/app.css -o public/css/app.css --minify
+npx tailwindcss -i src/css/app.css -o public/css/app.css --minify
 ```
 
 No test suite currently. There are no linting commands configured.
@@ -40,7 +40,18 @@ No test suite currently. There are no linting commands configured.
 
 - **Backend:** PHP 8.2+, no framework — Bramus/Router
 - **Database:** SQLite, stored at `data/crm.db` (gitignored). `PRAGMA foreign_keys = ON`, `busy_timeout = 5000` (web, cron, and MCP can write concurrently).
-- **Frontend:** Tailwind CSS + vanilla JS (`fetch()` for AJAX, no frameworks)
+- **Frontend:** Tailwind CSS + vanilla JS (`fetch()` for AJAX, no frameworks). Tailwind
+  source is `src/css/app.css`, compiled to `public/css/app.css` — **new utility classes
+  don't exist until you rebuild**. `tailwind.config.js` only scans `src/Views/**`, so
+  classes written inside `public/js/*.js` get purged; use literal styles there.
+- **Charts:** Chart.js 4.5.1, **vendored** to `public/js/chart.umd.min.js` (the CSP forbids
+  CDNs). Not an npm dependency — dropped in by hand like `qrcode.min.js`. Shared defaults
+  + palette + `doughnut()`/`moneyScale()` helpers live in
+  `public/js/charts.js` as `window.CrmCharts`. Opt in per page by setting
+  `$includeCharts = true` in the controller — `layouts/main.php` loads both scripts.
+  Same convention as `$includeQuill`. Used on `/`, `/insights`, `/freeagent`.
+- **Favicon:** `public/favicon.svg` (+ `.ico`, `apple-touch-icon.png`) — a "CD" monogram
+  on `accent-600`. Linked from both layouts; already guard-exempt in `src/routes.php`.
 - **Auth:** Single-user login with password + mandatory TOTP 2FA. Enforced by a
   global `before` guard in `src/routes.php` covering **all HTTP verbs**; flow lives in
   `AuthController` and `src/Views/auth/`. Sessions use HttpOnly/SameSite (Secure under
@@ -80,6 +91,8 @@ Request flow: `public/index.php` (front controller) → `src/bootstrap.php` (DB 
 
 **Per-client P&L:** `Client::getPL()` (one client) and `Client::getPLAll()` (all active clients in a few grouped queries — use this on list pages/dashboard; pass its result to `Client::getHealthAll($plAll)` to avoid recomputation).
 
+**Projects ↔ invoices (migration 029):** `project_invoice_links` is a manual many-to-many between `projects` and `freeagent_invoices` (same shape as `domain_invoice_links`). **`projects.income_invoiced` is derived, not typed** — `Project::syncInvoiceLinks()` replaces the links and recomputes the column from them (net, `COALESCE(net_value, total_value)`) in one transaction. It is deliberately *not* in `ProjectController::sanitise()`, so nothing else can overwrite it. The picker on the project form fetches candidates from `GET /projects/invoice-options?client_id=N[&project_id=M]`; only invoices belonging to the project's own client are accepted. An invoice may be linked to more than one project (the picker warns).
+
 **Agreements/SLAs (migration 026):** `agreements` covers both hours-based SLAs and build agreements with bundled cover:
 - `agreement_type`: `support` | `build_bundled` | `consultancy` | `other`
 - `status`: `active` | `expired` | `cancelled`
@@ -106,6 +119,8 @@ All optional — core CRM works without them. Config in per-integration tables (
 
 - **FreeAgent** (OAuth2): contacts, invoices (incl. `net_value`/`sales_tax_value`), recurring invoices, bills, bank transactions. `Services\FreeAgentClient` + `FreeAgentSync`.
 - **Ploi** (read-only): servers/sites mirrored into `ploi_servers`/`ploi_sites` by Ploi numeric ID. Records deleted in Ploi are marked `is_stale = 1` and skipped by later syncs (purge them from `/settings/ploi`). `ploi_sync_exclusions` (sites) and `ploi_server_exclusions` (servers) stop deleted records re-importing. Sync errors log to `ploi_sync_log`; the settings page shows only undismissed failures newer than the last successful full sync.
+  **ID trap:** `ploi_sites.ploi_server_id` holds the *local* `ploi_servers.id`, but `ploi_server_exclusions.ploi_server_id` holds *Ploi's* numeric server id — same name, different meaning.
+  When a site moves between servers in Ploi, `syncSites()` repoints both `ploi_sites.ploi_server_id` **and** the linked `client_sites.server_id` (the latter drives `/sites`, `/servers` and server-linked cost apportionment). To fix historical drift by hand, use the bulk selector on `/sites` → `POST /sites/bulk-server` (`SiteController::bulkUpdateServer()`).
 - **Cloudflare:** zones/DNS mirrored, matched to `domains` by name.
 
 ## MCP Server (migration 028)
@@ -127,4 +142,4 @@ Deployment notes: set `APP_URL`; ensure the web server doesn't intercept `/.well
 
 - New browser-form POST endpoints must call `csrfCheck()` and render `csrfField()` in their forms (legacy forms predate this; `/mcp`, `/oauth/token`, `/oauth/register` are correctly CSRF-exempt — no session semantics)
 - Never echo decrypted secrets into HTML (masked placeholder + empty value instead)
-- Next migration number: 029
+- Next migration number: 030

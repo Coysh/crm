@@ -18,12 +18,24 @@
         </form>
 
         <div class="flex flex-wrap gap-2 pt-2">
-            <form method="POST" action="/settings/cloudflare/test">
-                <button class="px-3 py-1.5 border rounded text-sm hover:bg-slate-50">Test Connection</button>
+            <form method="POST" action="/settings/cloudflare/test" onsubmit="return cfBusy(this, 'Testing…')">
+                <button class="px-3 py-1.5 border rounded text-sm hover:bg-slate-50 disabled:opacity-60 disabled:cursor-wait flex items-center gap-2">
+                    <span data-cf-label>Test Connection</span>
+                    <svg data-cf-spinner class="hidden w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
+                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+                    </svg>
+                </button>
             </form>
             <?php if ($connected): ?>
-                <form method="POST" action="/settings/cloudflare/sync">
-                    <button class="px-3 py-1.5 border rounded text-sm hover:bg-slate-50">Sync Zones &amp; DNS</button>
+                <form method="POST" action="/settings/cloudflare/sync" onsubmit="return cfBusy(this, 'Syncing…')">
+                    <button class="px-3 py-1.5 border rounded text-sm hover:bg-slate-50 disabled:opacity-60 disabled:cursor-wait flex items-center gap-2">
+                        <span data-cf-label>Sync Zones &amp; DNS</span>
+                        <svg data-cf-spinner class="hidden w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+                        </svg>
+                    </button>
                 </form>
                 <form method="POST" action="/settings/cloudflare/disconnect"
                       onsubmit="return confirm('Disconnect Cloudflare? The local zone data will be preserved.')">
@@ -31,6 +43,9 @@
                 </form>
             <?php endif ?>
         </div>
+        <p id="cf-busy-note" class="hidden text-xs text-slate-500">
+            Talking to Cloudflare — this can take a while on accounts with many zones. Please don't close this page.
+        </p>
 
         <p class="text-xs text-slate-500">
             Status: <span class="<?= $connected ? 'text-green-600' : 'text-slate-500' ?>"><?= $connected ? 'Connected' : 'Not connected' ?></span>
@@ -107,3 +122,30 @@
         </div>
     <?php endif ?>
 </div>
+
+<script>
+// These POST straight through to a redirect, so the busy state simply clears
+// when the new page lands — no AJAX needed. Guards against double-submits.
+function cfBusy(form, label) {
+    if (form.dataset.busy === '1') return false;   // already in flight
+    form.dataset.busy = '1';
+
+    const btn     = form.querySelector('button');
+    const text    = form.querySelector('[data-cf-label]');
+    const spinner = form.querySelector('[data-cf-spinner]');
+
+    if (text)    text.textContent = label;
+    if (spinner) spinner.classList.remove('hidden');
+    document.getElementById('cf-busy-note')?.classList.remove('hidden');
+
+    // Disable on the next tick: a button disabled *during* the submit handler
+    // can be skipped by the browser, so let the submission start first.
+    setTimeout(function() {
+        const row = form.parentElement;
+        row.querySelectorAll('button').forEach(b => { b.disabled = true; });
+        if (btn) btn.disabled = true;
+    }, 0);
+
+    return true;
+}
+</script>

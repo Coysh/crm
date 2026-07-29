@@ -106,7 +106,12 @@
                             </td>
                             <td class="px-4 py-2.5 text-slate-500"><?= e($categories[$p['income_category']] ?? $p['income_category']) ?></td>
                             <td class="px-4 py-2.5 text-right tabular-nums"><?= $pTarget > 0 ? money($pTarget) : '<span class="text-slate-300">—</span>' ?></td>
-                            <td class="px-4 py-2.5 text-right tabular-nums"><?= $pInvoiced > 0 ? money($pInvoiced) : '<span class="text-slate-300">—</span>' ?></td>
+                            <td class="px-4 py-2.5 text-right tabular-nums">
+                                <?= $pInvoiced > 0 ? money($pInvoiced) : '<span class="text-slate-300">—</span>' ?>
+                                <?php $lc = $invoiceLinkCounts[$p['id']] ?? 0; if ($lc): ?>
+                                    <span class="block text-xs text-slate-400 font-normal"><?= $lc ?> invoice<?= $lc !== 1 ? 's' : '' ?></span>
+                                <?php endif ?>
+                            </td>
                             <td class="px-4 py-2.5 text-right tabular-nums <?= $pRemaining < 0 ? 'text-red-600' : '' ?>">
                                 <?= $pTarget > 0 ? money($pRemaining) : '<span class="text-slate-300">—</span>' ?>
                             </td>

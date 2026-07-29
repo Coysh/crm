@@ -32,25 +32,53 @@ class FreeAgentController
         // ── Summary stats ──────────────────────────────────────────────
         $thisYear = date('Y') . '-01-01';
 
+        // Revenue aggregates exclude drafts, matching the dashboard and insights.
         $totalInvoiced = (float)$this->db->query("
             SELECT COALESCE(SUM(total_value), 0) FROM freeagent_invoices
+            WHERE COALESCE(status_override, status) IN ('paid', 'sent', 'overdue')
         ")->fetchColumn();
 
-        $thisYearInvoiced = (float)$this->db->prepare("
-            SELECT COALESCE(SUM(total_value), 0) FROM freeagent_invoices WHERE dated_on >= ?
-        ")->execute([$thisYear]) ? $this->db->query("
-            SELECT COALESCE(SUM(total_value), 0) FROM freeagent_invoices WHERE dated_on >= " . $this->db->quote($thisYear)
-        )->fetchColumn() : 0;
-
-        // Use prepared statements properly
-        $stmt = $this->db->prepare("SELECT COALESCE(SUM(total_value), 0) FROM freeagent_invoices WHERE dated_on >= ?");
+        $stmt = $this->db->prepare("
+            SELECT COALESCE(SUM(total_value), 0) FROM freeagent_invoices
+            WHERE COALESCE(status_override, status) IN ('paid', 'sent', 'overdue')
+              AND dated_on >= ?
+        ");
         $stmt->execute([$thisYear]);
         $thisYearInvoiced = (float)$stmt->fetchColumn();
 
-        $unpaidInvoiced = (float)$this->db->query("
-            SELECT COALESCE(SUM(total_value), 0) FROM freeagent_invoices
-            WHERE COALESCE(status_override, status) IN ('sent', 'overdue')
-        ")->fetchColumn();
+        // Outstanding stays gross (ex-VAT net is only used for revenue aggregates).
+        // One grouped pass gives both the headline figure and its sent/overdue split.
+        $byStatus = [];
+        foreach ($this->db->query("
+            SELECT COALESCE(status_override, status) AS eff_status,
+                   COUNT(*)                          AS cnt,
+                   COALESCE(SUM(total_value), 0)     AS total
+            FROM freeagent_invoices
+            GROUP BY eff_status
+        ")->fetchAll() as $row) {
+            $byStatus[(string)$row['eff_status']] = [
+                'count' => (int)$row['cnt'],
+                'total' => (float)$row['total'],
+            ];
+        }
+
+        $sentInvoiced    = $byStatus['sent']['total']    ?? 0.0;
+        $sentCount       = $byStatus['sent']['count']    ?? 0;
+        $overdueInvoiced = $byStatus['overdue']['total'] ?? 0.0;
+        $overdueCount    = $byStatus['overdue']['count'] ?? 0;
+        $unpaidInvoiced  = $sentInvoiced + $overdueInvoiced;
+        $unpaidCount     = $sentCount + $overdueCount;
+
+        // The invoices making up the unpaid figure, oldest due first.
+        $unpaidInvoices = $this->db->query("
+            SELECT fi.*,
+                   COALESCE(fi.status_override, fi.status) AS eff_status,
+                   c.name AS client_name
+            FROM freeagent_invoices fi
+            LEFT JOIN clients c ON c.id = fi.client_id
+            WHERE COALESCE(fi.status_override, fi.status) IN ('sent', 'overdue')
+            ORDER BY COALESCE(fi.due_date, fi.dated_on) ASC
+        ")->fetchAll();
 
         $totalExpenses = (float)$this->db->query("
             SELECT COALESCE(SUM(ABS(gross_value)), 0) FROM freeagent_bank_transactions
@@ -139,13 +167,17 @@ class FreeAgentController
 
         $allClients = $this->db->query("SELECT id, name FROM clients WHERE status = 'active' ORDER BY name")->fetchAll();
 
+        $includeCharts = true;
+
         render('freeagent.index', compact(
             'connected',
-            'totalInvoiced', 'thisYearInvoiced', 'unpaidInvoiced',
+            'totalInvoiced', 'thisYearInvoiced', 'unpaidInvoiced', 'unpaidCount',
+            'sentInvoiced', 'sentCount', 'overdueInvoiced', 'overdueCount', 'byStatus',
+            'unpaidInvoices',
             'totalExpenses', 'thisYearExpenses', 'netIncome',
             'confirmedMrr', 'pipelineMrr', 'allRecurring',
             'byCategory', 'recentInvoices', 'recentExpenses',
-            'syncHistory', 'lastSync', 'lastError', 'allClients'
+            'syncHistory', 'lastSync', 'lastError', 'allClients', 'includeCharts'
         ), 'FreeAgent');
     }
 

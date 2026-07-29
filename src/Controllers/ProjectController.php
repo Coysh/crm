@@ -30,7 +30,11 @@ class ProjectController
         $statuses   = Project::statuses();
         $includeQuill = true;
 
-        render('projects.index', compact('projects', 'clients', 'clientId', 'status', 'categories', 'statuses', 'includeQuill'), 'Projects');
+        $invoiceLinkCounts = $this->model->invoiceLinkCounts(
+            array_map(fn(array $p) => (int)$p['id'], $projects)
+        );
+
+        render('projects.index', compact('projects', 'clients', 'clientId', 'status', 'categories', 'statuses', 'includeQuill', 'invoiceLinkCounts'), 'Projects');
     }
 
     public function create(): void
@@ -47,26 +51,44 @@ class ProjectController
             $project['client_id'] = (int)$_GET['client_id'];
         }
 
-        render('projects.form', compact('project', 'errors', 'clients', 'categories', 'statuses', 'breadcrumbs', 'includeQuill'), 'Add Project');
+        $linkedInvoiceIds = [];
+        $invoiceOptions   = !empty($project['client_id'])
+            ? $this->model->invoiceOptions((int)$project['client_id'])
+            : [];
+
+        render('projects.form', compact('project', 'errors', 'clients', 'categories', 'statuses', 'breadcrumbs', 'includeQuill', 'linkedInvoiceIds', 'invoiceOptions'), 'Add Project');
     }
 
     public function store(): void
     {
+        if (!csrfCheck()) {
+            flash('error', 'Your session expired. Please try again.');
+            redirect('/projects');
+        }
+
         $data   = $this->sanitise($_POST);
         $errors = $this->validate($data);
         $clients    = $this->clientModel->findAll(['status' => 'active'], 'name');
         $categories = Project::incomeCategories();
         $statuses   = Project::statuses();
 
+        $invoiceIds = array_map('intval', (array)($_POST['invoice_ids'] ?? []));
+
         if ($errors) {
             $project     = $data;
             $breadcrumbs = [['Projects', '/projects'], ['Add Project', null]];
             $includeQuill = true;
-            render('projects.form', compact('project', 'errors', 'clients', 'categories', 'statuses', 'breadcrumbs', 'includeQuill'), 'Add Project');
+            $linkedInvoiceIds = $invoiceIds;
+            $invoiceOptions   = $data['client_id']
+                ? $this->model->invoiceOptions($data['client_id'])
+                : [];
+            render('projects.form', compact('project', 'errors', 'clients', 'categories', 'statuses', 'breadcrumbs', 'includeQuill', 'linkedInvoiceIds', 'invoiceOptions'), 'Add Project');
             return;
         }
 
-        $this->model->insert($data);
+        $id = $this->model->insert($data);
+        $this->model->syncInvoiceLinks($id, $invoiceIds);
+
         flash('success', "Project '{$data['name']}' created.");
         redirect('/projects');
     }
@@ -82,11 +104,19 @@ class ProjectController
         $statuses    = Project::statuses();
         $breadcrumbs = [['Projects', '/projects'], ['Edit ' . $project['name'], null]];
         $includeQuill = true;
-        render('projects.form', compact('project', 'errors', 'clients', 'categories', 'statuses', 'breadcrumbs', 'includeQuill'), 'Edit Project');
+        $linkedInvoiceIds = $this->model->linkedInvoiceIds($id);
+        $invoiceOptions   = $this->model->invoiceOptions((int)$project['client_id'], $id);
+
+        render('projects.form', compact('project', 'errors', 'clients', 'categories', 'statuses', 'breadcrumbs', 'includeQuill', 'linkedInvoiceIds', 'invoiceOptions'), 'Edit Project');
     }
 
     public function update(int $id): void
     {
+        if (!csrfCheck()) {
+            flash('error', 'Your session expired. Please try again.');
+            redirect('/projects');
+        }
+
         $project = $this->model->findById($id);
         if (!$project) { http_response_code(404); render('errors.404', [], '404 Not Found'); return; }
 
@@ -96,14 +126,20 @@ class ProjectController
         $categories = Project::incomeCategories();
         $statuses   = Project::statuses();
 
+        $invoiceIds = array_map('intval', (array)($_POST['invoice_ids'] ?? []));
+
         if ($errors) {
             $breadcrumbs = [['Projects', '/projects'], ['Edit ' . $project['name'], null]];
             $includeQuill = true;
-            render('projects.form', compact('project', 'errors', 'clients', 'categories', 'statuses', 'breadcrumbs', 'includeQuill'), 'Edit Project');
+            $linkedInvoiceIds = $invoiceIds;
+            $invoiceOptions   = $this->model->invoiceOptions((int)($data['client_id'] ?: $project['client_id']), $id);
+            render('projects.form', compact('project', 'errors', 'clients', 'categories', 'statuses', 'breadcrumbs', 'includeQuill', 'linkedInvoiceIds', 'invoiceOptions'), 'Edit Project');
             return;
         }
 
         $this->model->update($id, $data);
+        $this->model->syncInvoiceLinks($id, $invoiceIds);
+
         flash('success', "Project '{$data['name']}' updated.");
         redirect('/projects');
     }
@@ -172,6 +208,44 @@ class ProjectController
         exit;
     }
 
+    /**
+     * JSON: the invoices belonging to a client, for the project form's
+     * invoice picker. Read-only, so no CSRF token is required.
+     */
+    public function invoiceOptions(): void
+    {
+        header('Content-Type: application/json');
+
+        $clientId  = (int)($_GET['client_id'] ?? 0);
+        $projectId = isset($_GET['project_id']) && $_GET['project_id'] !== ''
+            ? (int)$_GET['project_id']
+            : null;
+
+        if (!$clientId) {
+            echo json_encode(['ok' => true, 'invoices' => []]);
+            exit;
+        }
+
+        $rows = $this->model->invoiceOptions($clientId, $projectId);
+
+        echo json_encode([
+            'ok'       => true,
+            'invoices' => array_map(fn(array $r) => [
+                'id'                 => (int)$r['id'],
+                'reference'          => $r['reference'] ?: '—',
+                'dated_on'           => $r['dated_on'],
+                'dated_label'        => formatDate($r['dated_on']),
+                'net_value'          => (float)$r['net_value'],
+                'total_value'        => (float)$r['total_value'],
+                'status'             => $r['eff_status'],
+                'linked_here'        => (bool)$r['linked_here'],
+                'other_project_id'   => $r['other_project_id'] ? (int)$r['other_project_id'] : null,
+                'other_project_name' => $r['other_project_name'],
+            ], $rows),
+        ]);
+        exit;
+    }
+
     private function sanitise(array $post): array
     {
         $categories = array_keys(Project::incomeCategories());
@@ -182,7 +256,8 @@ class ProjectController
             'income_category' => in_array($post['income_category'] ?? '', $categories) ? $post['income_category'] : '',
             'income'          => (float)($post['income'] ?? 0),
             'income_target'   => (float)($post['income_target'] ?? 0),
-            'income_invoiced' => (float)($post['income_invoiced'] ?? 0),
+            // income_invoiced is deliberately absent: it is derived from the
+            // linked FreeAgent invoices by Project::syncInvoiceLinks().
             'start_date'      => ($post['start_date'] ?? '') ?: null,
             'end_date'        => ($post['end_date'] ?? '') ?: null,
             'notes'           => $this->sanitiseHtml($post['notes'] ?? ''),

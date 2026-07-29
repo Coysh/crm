@@ -128,7 +128,10 @@ class InsightsController
             }
         } catch (\Throwable) {}
 
+        $includeCharts = true;
+
         render('insights.index', compact(
+            'includeCharts',
             'fy', 'labelThis', 'labelLast',
             'revenueThis', 'revenueLast',
             'costsThis', 'costsLast',
@@ -466,10 +469,17 @@ class InsightsController
             $stmtLast->execute([$lastMonthStart, min($lastMonthEnd, $endLast->format('Y-m-d'))]);
             $lastVal = (float)$stmtLast->fetchColumn();
 
+            // Costs for the same window, so the chart's cost line is populated
+            // on first paint too (not only after an AJAX year navigation).
+            $cEnd   = min($monthEnd, $endThis->format('Y-m-d'));
+            $cDays  = (new \DateTime($monthStart))->diff(new \DateTime($cEnd))->days + 1;
+            $thisCosts = $this->sumCosts($monthStart, $cEnd, $cDays / 30.44, $cDays);
+
             $months[] = [
-                'label'     => $cursor->format("M 'y"),
-                'this_year' => $thisVal,
-                'last_year' => $lastVal,
+                'label'      => $cursor->format("M 'y"),
+                'this_year'  => $thisVal,
+                'last_year'  => $lastVal,
+                'this_costs' => $thisCosts,
             ];
 
             $cursor->modify('+1 month');

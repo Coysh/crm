@@ -108,6 +108,9 @@ $router->get('/sites/create', function () use ($db) {
 $router->post('/sites', function () use ($db) {
     (new CoyshCRM\Controllers\SiteController($db))->store();
 });
+$router->post('/sites/bulk-server', function () use ($db) {
+    (new CoyshCRM\Controllers\SiteController($db))->bulkUpdateServer();
+});
 $router->get('/sites/matching', function () use ($db) {
     (new CoyshCRM\Controllers\SiteController($db))->matching();
 });
@@ -321,6 +324,9 @@ $router->get('/projects', function () use ($db) {
 });
 $router->get('/projects/create', function () use ($db) {
     (new CoyshCRM\Controllers\ProjectController($db))->create();
+});
+$router->get('/projects/invoice-options', function () use ($db) {
+    (new CoyshCRM\Controllers\ProjectController($db))->invoiceOptions();
 });
 $router->post('/projects', function () use ($db) {
     (new CoyshCRM\Controllers\ProjectController($db))->store();

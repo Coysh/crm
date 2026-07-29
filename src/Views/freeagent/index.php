@@ -48,10 +48,9 @@
     <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <?php
         $cards = [
-            ['Total Invoiced',     money($totalInvoiced),     'text-slate-800', 'All time'],
-            ['Invoiced This Year', money($thisYearInvoiced),  'text-slate-800', date('Y')],
+            ['Total Invoiced',     money($totalInvoiced),     'text-slate-800', 'All time · excl. drafts'],
+            ['Invoiced This Year', money($thisYearInvoiced),  'text-slate-800', date('Y') . ' · excl. drafts'],
             ['Total Expenses',     money($totalExpenses),     'text-slate-800', 'Bank transactions'],
-            ['Unpaid Invoices',    money($unpaidInvoiced),    $unpaidInvoiced > 0 ? 'text-amber-600' : 'text-slate-800', 'Sent + overdue'],
         ];
         foreach ($cards as [$label, $value, $color, $sub]): ?>
             <div class="bg-white border border-slate-200 rounded-lg p-4">
@@ -60,7 +59,119 @@
                 <p class="text-xs text-slate-400 mt-0.5"><?= $sub ?></p>
             </div>
         <?php endforeach ?>
+
+        <!-- Unpaid, broken down into sent vs overdue -->
+        <div class="bg-white border border-slate-200 rounded-lg p-4">
+            <p class="text-xs text-slate-400 font-medium uppercase tracking-wide">Unpaid Invoices</p>
+            <p class="mt-1 text-xl font-semibold <?= $unpaidInvoiced > 0 ? 'text-amber-600' : 'text-slate-800' ?>">
+                <?= money($unpaidInvoiced) ?>
+            </p>
+            <?php if ($unpaidCount > 0): ?>
+                <div class="mt-1.5 space-y-0.5 text-xs">
+                    <a href="#outstanding" onclick="filterUnpaid('sent')" class="flex items-center justify-between gap-2 hover:bg-slate-50 rounded px-1 -mx-1 py-0.5">
+                        <span class="flex items-center gap-1.5 text-slate-500">
+                            <span class="inline-block w-2 h-2 rounded-sm bg-blue-400"></span>Sent
+                        </span>
+                        <span class="tabular-nums text-slate-700 font-medium">
+                            <?= money($sentInvoiced) ?> <span class="text-slate-400 font-normal">(<?= $sentCount ?>)</span>
+                        </span>
+                    </a>
+                    <a href="#outstanding" onclick="filterUnpaid('overdue')" class="flex items-center justify-between gap-2 hover:bg-slate-50 rounded px-1 -mx-1 py-0.5">
+                        <span class="flex items-center gap-1.5 text-slate-500">
+                            <span class="inline-block w-2 h-2 rounded-sm bg-red-400"></span>Overdue
+                        </span>
+                        <span class="tabular-nums <?= $overdueInvoiced > 0 ? 'text-red-600' : 'text-slate-700' ?> font-medium">
+                            <?= money($overdueInvoiced) ?> <span class="text-slate-400 font-normal">(<?= $overdueCount ?>)</span>
+                        </span>
+                    </a>
+                </div>
+            <?php else: ?>
+                <p class="text-xs text-slate-400 mt-0.5">Nothing outstanding</p>
+            <?php endif ?>
+        </div>
     </div>
+
+    <!-- Outstanding invoices -->
+    <?php if ($unpaidInvoices): ?>
+    <div class="bg-white border border-slate-200 rounded-lg overflow-hidden" id="outstanding">
+        <div class="px-5 py-3 border-b border-slate-200 flex items-center justify-between gap-4 flex-wrap">
+            <div class="flex items-center gap-4">
+                <h2 class="text-sm font-semibold text-slate-700">Outstanding Invoices</h2>
+                <span class="text-xs text-slate-400" id="unpaid-summary"></span>
+            </div>
+            <div class="flex gap-1 text-xs">
+                <?php foreach ([
+                    'all'     => 'All (' . $unpaidCount . ')',
+                    'sent'    => 'Sent (' . $sentCount . ')',
+                    'overdue' => 'Overdue (' . $overdueCount . ')',
+                ] as $val => $label): ?>
+                    <button type="button" data-unpaid-filter="<?= $val ?>" onclick="filterUnpaid('<?= $val ?>')"
+                            class="unpaid-filter-btn px-2 py-1 rounded bg-slate-100 text-slate-600 hover:bg-slate-200">
+                        <?= $label ?>
+                    </button>
+                <?php endforeach ?>
+            </div>
+        </div>
+        <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+            <thead class="bg-slate-50 text-xs text-slate-500 uppercase tracking-wide">
+                <tr>
+                    <th class="px-4 py-2.5 text-left">Client</th>
+                    <th class="px-4 py-2.5 text-left">Reference</th>
+                    <th class="px-4 py-2.5 text-right">Amount</th>
+                    <th class="px-4 py-2.5 text-center">Status</th>
+                    <th class="px-4 py-2.5 text-left">Due</th>
+                </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-100" id="unpaid-tbody">
+                <?php
+                $today = new DateTimeImmutable('today');
+                foreach ($unpaidInvoices as $inv):
+                    $eff = $inv['eff_status'];
+                    $due = $inv['due_date'] ?: null;
+                    $daysLate = null;
+                    if ($due) {
+                        try {
+                            $daysLate = (int)$today->diff(new DateTimeImmutable($due))->format('%r%a');
+                        } catch (\Throwable) {}
+                    }
+                ?>
+                    <tr class="hover:bg-slate-50 unpaid-row" data-status="<?= e($eff) ?>" data-amount="<?= (float)$inv['total_value'] ?>">
+                        <td class="px-4 py-2.5">
+                            <?php if ($inv['client_id']): ?>
+                                <a href="/clients/<?= $inv['client_id'] ?>" class="text-accent-600 hover:underline"><?= e($inv['client_name'] ?? '—') ?></a>
+                            <?php else: ?>
+                                <span class="text-amber-600 text-xs font-medium">Unassigned</span>
+                            <?php endif ?>
+                        </td>
+                        <td class="px-4 py-2.5 font-mono text-xs">
+                            <?= freeagentLink($inv['freeagent_url'] ?? null, $inv['reference'] ?: '—') ?>
+                            <?php if (!empty($inv['status_override'])): ?>
+                                <span class="ml-1 inline-block px-1 py-0.5 rounded text-xs font-medium bg-slate-100 text-slate-500"
+                                      title="<?= e($inv['status_override_note'] ?? 'Manual status override') ?>">Override</span>
+                            <?php endif ?>
+                        </td>
+                        <td class="px-4 py-2.5 text-right tabular-nums font-medium"><?= money($inv['total_value']) ?></td>
+                        <td class="px-4 py-2.5 text-center">
+                            <span class="inline-block px-2 py-0.5 rounded-full text-xs font-medium <?= $eff === 'overdue' ? 'bg-red-100 text-red-700' : 'bg-blue-100 text-blue-700' ?>">
+                                <?= ucfirst($eff) ?>
+                            </span>
+                        </td>
+                        <td class="px-4 py-2.5 text-slate-500 text-xs">
+                            <?= $due ? formatDate($due) : '—' ?>
+                            <?php if ($daysLate !== null && $daysLate < 0): ?>
+                                <span class="text-red-600 font-medium">· <?= abs($daysLate) ?>d late</span>
+                            <?php elseif ($daysLate !== null): ?>
+                                <span class="text-slate-400">· in <?= $daysLate ?>d</span>
+                            <?php endif ?>
+                        </td>
+                    </tr>
+                <?php endforeach ?>
+            </tbody>
+        </table>
+        </div>
+    </div>
+    <?php endif ?>
 
     <!-- Recurring Income -->
     <div class="bg-white border border-slate-200 rounded-lg overflow-hidden">
@@ -149,7 +260,45 @@
         <?php endif ?>
     </div>
 
-    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+
+        <!-- Invoice value by status -->
+        <div class="bg-white border border-slate-200 rounded-lg overflow-hidden">
+            <div class="px-5 py-3 border-b border-slate-200">
+                <h2 class="text-sm font-semibold text-slate-700">Invoice Value by Status</h2>
+            </div>
+            <div class="p-5">
+                <div class="h-56"><canvas id="status-chart"></canvas></div>
+            </div>
+            <script>
+            (function() {
+                <?php
+                $statusOrder  = ['paid' => '#22c55e', 'sent' => '#3b82f6', 'overdue' => '#ef4444', 'draft' => '#94a3b8'];
+                $statusSlices = [];
+                foreach ($statusOrder as $key => $colour) {
+                    $val = $byStatus[$key]['total'] ?? 0;
+                    if ($val > 0) {
+                        $statusSlices[] = ['label' => ucfirst($key), 'value' => round((float)$val, 2), 'color' => $colour];
+                    }
+                }
+                // Anything FreeAgent returns outside the four we know about.
+                foreach ($byStatus as $key => $info) {
+                    if (isset($statusOrder[$key]) || $info['total'] <= 0) continue;
+                    $statusSlices[] = ['label' => ucfirst((string)$key), 'value' => round((float)$info['total'], 2)];
+                }
+                ?>
+                const slices = <?= json_encode($statusSlices) ?>;
+
+                document.addEventListener('DOMContentLoaded', function() {
+                    const C = window.CrmCharts;
+                    const canvas = document.getElementById('status-chart');
+                    if (!canvas || !C) return;
+                    if (!slices.length) { C.empty(canvas, 'No invoices synced yet.'); return; }
+                    C.doughnut(canvas, slices, { legendPosition: 'bottom' });
+                });
+            })();
+            </script>
+        </div>
 
         <!-- Income by Category -->
         <div class="bg-white border border-slate-200 rounded-lg overflow-hidden">
@@ -232,7 +381,8 @@
             <tbody class="divide-y divide-slate-100">
                 <?php foreach ($recentInvoices as $inv): ?>
                     <?php
-                    $statusColor = match($inv['status']) {
+                    $effStatus = $inv['status_override'] ?? $inv['status'];
+                    $statusColor = match($effStatus) {
                         'paid'    => 'bg-green-100 text-green-700',
                         'overdue' => 'bg-red-100 text-red-700',
                         'sent'    => 'bg-blue-100 text-blue-700',
@@ -265,7 +415,7 @@
                         <td class="px-4 py-2.5 text-right tabular-nums font-medium"><?= money($inv['total_value']) ?></td>
                         <td class="px-4 py-2.5 text-center">
                             <span class="inline-block px-2 py-0.5 rounded-full text-xs font-medium <?= $statusColor ?>">
-                                <?= ucfirst($inv['status'] ?? 'unknown') ?>
+                                <?= ucfirst($effStatus ?? 'unknown') ?>
                             </span>
                         </td>
                         <td class="px-4 py-2.5 text-slate-500"><?= formatDate($inv['dated_on']) ?></td>
@@ -349,6 +499,34 @@ function sortRecurring(col) {
     });
     rows.forEach(r => tbody.appendChild(r));
 }
+
+// ── Outstanding invoices filter (sent / overdue) ──────────────────────────
+function filterUnpaid(status) {
+    const rows = document.querySelectorAll('.unpaid-row');
+    if (!rows.length) return;
+
+    let count = 0, total = 0;
+    rows.forEach(r => {
+        const show = status === 'all' || r.dataset.status === status;
+        r.classList.toggle('hidden', !show);
+        if (show) { count++; total += parseFloat(r.dataset.amount) || 0; }
+    });
+
+    document.querySelectorAll('.unpaid-filter-btn').forEach(b => {
+        const active = b.dataset.unpaidFilter === status;
+        b.classList.toggle('bg-accent-600', active);
+        b.classList.toggle('text-white', active);
+        b.classList.toggle('bg-slate-100', !active);
+        b.classList.toggle('text-slate-600', !active);
+    });
+
+    const summary = document.getElementById('unpaid-summary');
+    if (summary) {
+        summary.textContent = count + ' invoice' + (count !== 1 ? 's' : '') + ' · £'
+            + total.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+}
+document.addEventListener('DOMContentLoaded', () => filterUnpaid('all'));
 
 // ── Inline client assignment (invoices + recurring) ───────────────────────
 function assignFaClient(type, id, select) {

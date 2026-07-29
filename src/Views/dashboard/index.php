@@ -47,6 +47,116 @@ function dashDiff(float $a, float $b, bool $lowerIsBetter = false): array
         <?php endforeach ?>
     </div>
 
+    <!-- Charts -->
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <div class="bg-white border border-slate-200 rounded-lg p-5">
+            <h2 class="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-3">Client Health</h2>
+            <div class="h-52"><canvas id="health-chart"></canvas></div>
+        </div>
+        <div class="bg-white border border-slate-200 rounded-lg p-5 lg:col-span-2">
+            <h2 class="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-3">
+                Monthly Recurring Revenue by Client
+            </h2>
+            <div class="h-52"><canvas id="revenue-chart"></canvas></div>
+        </div>
+    </div>
+
+    <script>
+    (function() {
+        const health = <?= json_encode([
+            ['label' => 'Healthy',   'value' => (int)($healthCounts['healthy'] ?? 0)],
+            ['label' => 'Attention', 'value' => (int)($healthCounts['attention'] ?? 0)],
+            ['label' => 'At risk',   'value' => (int)($healthCounts['at_risk'] ?? 0)],
+        ]) ?>;
+
+        <?php
+        // Top clients by MRR; everything else collapses into "Other" so the
+        // bar chart stays readable however many clients there are.
+        $byMrr = array_values(array_filter($clientPL, fn(array $r) => (float)($r['mrr'] ?? 0) > 0));
+        usort($byMrr, fn(array $a, array $b) => (float)$b['mrr'] <=> (float)$a['mrr']);
+        $topN  = array_slice($byMrr, 0, 10);
+        $rest  = array_slice($byMrr, 10);
+        $restTotal = array_sum(array_map(fn(array $r) => (float)$r['mrr'], $rest));
+        $revRows = array_map(fn(array $r) => [
+            'label'  => $r['name'],
+            'value'  => round((float)$r['mrr'], 2),
+            'profit' => round((float)($r['profit'] ?? 0), 2),
+        ], $topN);
+        if ($restTotal > 0) {
+            $revRows[] = [
+                'label'       => count($rest) . ' others',
+                'value'       => round($restTotal, 2),
+                'profit'      => null,
+                'is_aggregate' => true,
+            ];
+        }
+        ?>
+        const revenue = <?= json_encode($revRows) ?>;
+
+        document.addEventListener('DOMContentLoaded', function() {
+            const C = window.CrmCharts;
+            if (!C) return;
+
+            // ── Client health doughnut ──────────────────────────────────
+            const hc = document.getElementById('health-chart');
+            if (hc) {
+                if (!health.some(h => h.value > 0)) {
+                    C.empty(hc, 'No active clients yet.');
+                } else {
+                    C.doughnut(hc, [
+                        { label: health[0].label, value: health[0].value, color: C.colors.green },
+                        { label: health[1].label, value: health[1].value, color: C.colors.amber },
+                        { label: health[2].label, value: health[2].value, color: C.colors.red },
+                    ], { money: false, legendPosition: 'bottom' });
+                }
+            }
+
+            // ── MRR by client ───────────────────────────────────────────
+            const rc = document.getElementById('revenue-chart');
+            if (rc) {
+                if (!revenue.length) {
+                    C.empty(rc, 'No recurring revenue yet.');
+                } else {
+                    new Chart(rc, {
+                        type: 'bar',
+                        data: {
+                            labels: revenue.map(r => r.label),
+                            datasets: [{
+                                label: 'Monthly recurring',
+                                data: revenue.map(r => r.value),
+                                backgroundColor: revenue.map(r =>
+                                    r.is_aggregate                        ? C.colors.slate
+                                  : r.profit !== null && r.profit < 0     ? C.colors.red
+                                  :                                         C.colors.accent),
+                                borderRadius: 2,
+                            }],
+                        },
+                        options: {
+                            indexAxis: 'y',
+                            scales: {
+                                x: C.moneyScale(),
+                                y: C.categoryScale({ ticks: { padding: 4, autoSkip: false } }),
+                            },
+                            plugins: {
+                                legend: { display: false },
+                                tooltip: {
+                                    callbacks: {
+                                        label: ctx => ' ' + C.gbp(ctx.parsed.x) + ' / month',
+                                        afterLabel: function(ctx) {
+                                            const r = revenue[ctx.dataIndex];
+                                            return r.profit === null ? '' : 'Profit: ' + C.gbp(r.profit);
+                                        },
+                                    },
+                                },
+                            },
+                        },
+                    });
+                }
+            }
+        });
+    })();
+    </script>
+
     <!-- Client P&L Table -->
     <div class="bg-white border border-slate-200 rounded-lg overflow-hidden">
         <div class="px-5 py-3 border-b border-slate-200 flex items-center justify-between">

@@ -13,6 +13,12 @@ function siteRow(array $s, array $allClients, bool $ploiConnected): void { ?>
         data-stack="<?= strtolower(e($s['website_stack'] ?? '')) ?>"
         data-unassigned="<?= $s['client_id'] ? '0' : '1' ?>">
 
+        <!-- Bulk select -->
+        <td class="px-3 py-2.5 w-8">
+            <input type="checkbox" class="site-checkbox rounded border-slate-300 text-accent-600 focus:ring-accent-500"
+                   value="<?= $s['id'] ?>" onchange="updateSiteBulkBar()">
+        </td>
+
         <!-- Domain -->
         <td class="px-4 py-2.5 font-mono text-xs">
             <a href="/sites/<?= $s['id'] ?>" class="text-accent-600 hover:underline">
@@ -124,6 +130,10 @@ function siteRow(array $s, array $allClients, bool $ploiConnected): void { ?>
 function tableHeader(bool $ploiConnected): void { ?>
     <thead class="bg-slate-50 text-xs text-slate-500 uppercase tracking-wide sticky top-0">
         <tr>
+            <th class="px-3 py-2.5 w-8">
+                <input type="checkbox" class="select-all-sites rounded border-slate-300 text-accent-600 focus:ring-accent-500"
+                       onchange="toggleAllSites(this)" title="Select all visible">
+            </th>
             <th class="px-4 py-2.5 text-left">Domain</th>
             <th class="px-4 py-2.5 text-left">Client</th>
             <th class="px-4 py-2.5 text-left">Server</th>
@@ -242,7 +252,97 @@ function tableHeader(bool $ploiConnected): void { ?>
 
 </div>
 
+<!-- Bulk action bar -->
+<div id="site-bulk-bar"
+     class="hidden fixed bottom-0 left-0 right-0 lg:left-56 bg-slate-800 text-white px-5 py-3 shadow-lg z-30">
+    <form method="POST" action="/sites/bulk-server" id="site-bulk-form"
+          class="flex flex-wrap items-center gap-3 text-sm">
+        <?= csrfField() ?>
+        <input type="hidden" name="return_to" value="<?= e($_SERVER['REQUEST_URI'] ?? '/sites') ?>">
+        <div id="site-bulk-ids"></div>
+
+        <span id="site-bulk-count" class="font-medium">0 sites selected</span>
+
+        <span class="text-slate-400">→ move to</span>
+        <select name="server_id" id="site-bulk-server" required
+                class="border border-slate-600 bg-slate-700 text-white rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-accent-500">
+            <option value="">— Select server —</option>
+            <?php foreach ($servers as $sv): ?>
+                <option value="<?= $sv['id'] ?>"><?= e($sv['name']) ?></option>
+            <?php endforeach ?>
+            <option value="__none__">— No server (external) —</option>
+        </select>
+
+        <button type="submit"
+                class="px-3 py-1.5 bg-accent-600 hover:bg-accent-700 rounded text-sm font-medium">
+            Move
+        </button>
+        <button type="button" onclick="clearSiteSelection()"
+                class="text-slate-300 hover:text-white text-xs ml-auto">Clear selection</button>
+    </form>
+</div>
+
 <script>
+// ── Bulk selection / server move ────────────────────────────────────────────
+function visibleSiteCheckboxes() {
+    return [...document.querySelectorAll('.site-checkbox')]
+        .filter(cb => cb.closest('tr').style.display !== 'none');
+}
+
+function getCheckedSiteIds() {
+    return [...document.querySelectorAll('.site-checkbox:checked')].map(cb => cb.value);
+}
+
+function toggleAllSites(source) {
+    visibleSiteCheckboxes().forEach(cb => { cb.checked = source.checked; });
+    updateSiteBulkBar();
+}
+
+function clearSiteSelection() {
+    document.querySelectorAll('.site-checkbox').forEach(cb => { cb.checked = false; });
+    updateSiteBulkBar();
+}
+
+function updateSiteBulkBar() {
+    const ids = getCheckedSiteIds();
+    const bar = document.getElementById('site-bulk-bar');
+
+    document.getElementById('site-bulk-count').textContent =
+        ids.length + ' site' + (ids.length !== 1 ? 's' : '') + ' selected';
+    bar.classList.toggle('hidden', ids.length === 0);
+
+    // Rebuild the hidden inputs the form posts.
+    const holder = document.getElementById('site-bulk-ids');
+    holder.innerHTML = '';
+    ids.forEach(id => {
+        const inp = document.createElement('input');
+        inp.type = 'hidden'; inp.name = 'site_ids[]'; inp.value = id;
+        holder.appendChild(inp);
+    });
+
+    // Sync each select-all box against its own visible rows.
+    const visible = visibleSiteCheckboxes();
+    const checked = visible.filter(cb => cb.checked).length;
+    document.querySelectorAll('.select-all-sites').forEach(sa => {
+        sa.indeterminate = checked > 0 && checked < visible.length;
+        sa.checked       = visible.length > 0 && checked === visible.length;
+    });
+}
+
+document.getElementById('site-bulk-form').addEventListener('submit', function(e) {
+    const sel = document.getElementById('site-bulk-server');
+    const ids = getCheckedSiteIds();
+    if (!ids.length) { e.preventDefault(); return; }
+
+    const label = sel.options[sel.selectedIndex].text;
+    if (!confirm('Move ' + ids.length + ' site' + (ids.length !== 1 ? 's' : '') + ' to ' + label + '?')) {
+        e.preventDefault();
+        return;
+    }
+    // Empty string means "detach"; the sentinel keeps `required` satisfied.
+    if (sel.value === '__none__') sel.value = '';
+});
+
 function applyFilters() {
     const search     = document.getElementById('filter-search').value.toLowerCase();
     const server     = document.getElementById('filter-server').value;
@@ -262,6 +362,13 @@ function applyFilters() {
         row.style.display = show ? '' : 'none';
         if (show) visible++;
 
+        // Don't keep a hidden row selected — "select all visible" then Move
+        // should only ever act on what you can see.
+        if (!show) {
+            const cb = row.querySelector('.site-checkbox');
+            if (cb) cb.checked = false;
+        }
+
         // Also toggle group headers (grouped view)
         const section = row.closest('.group-section');
         if (section) {
@@ -276,6 +383,8 @@ function applyFilters() {
 
     const noResults = document.getElementById('no-results');
     if (noResults) noResults.classList.toggle('hidden', visible > 0);
+
+    updateSiteBulkBar();
 }
 
 function clearFilters() {

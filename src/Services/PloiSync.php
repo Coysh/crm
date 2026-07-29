@@ -226,12 +226,12 @@ class PloiSync
 
                         $domain = $site['domain'] ?? ($site['name'] ?? 'unknown');
 
-                        if (!$existingCsId) {
-                            // Resolve the linked server_id from the ploi_server row
-                            $srvRow = $this->db->prepare("SELECT server_id FROM ploi_servers WHERE id = ?");
-                            $srvRow->execute([$server['id']]);
-                            $linkedServerId = $srvRow->fetchColumn() ?: null;
+                        // Resolve the linked CRM server_id from the ploi_server row
+                        $srvRow = $this->db->prepare("SELECT server_id FROM ploi_servers WHERE id = ?");
+                        $srvRow->execute([$server['id']]);
+                        $linkedServerId = $srvRow->fetchColumn() ?: null;
 
+                        if (!$existingCsId) {
                             $this->db->prepare(
                                 "INSERT INTO client_sites
                                     (client_id, server_id, website_stack, git_repo, notes, created_at)
@@ -247,6 +247,16 @@ class PloiSync
                                 "UPDATE ploi_sites SET client_site_id = ? WHERE ploi_id = ?"
                             )->execute([$newCsId, $siteId]);
                             $existingCsId = $newCsId;
+                        } elseif ($linkedServerId) {
+                            // The site already exists locally. If it has moved to a
+                            // different server in Ploi, follow that move — otherwise
+                            // client_sites.server_id silently keeps pointing at the old
+                            // server, skewing the sites/servers views and the
+                            // server-linked recurring cost apportionment.
+                            $this->db->prepare(
+                                "UPDATE client_sites SET server_id = ?
+                                 WHERE id = ? AND (server_id IS NULL OR server_id != ?)"
+                            )->execute([$linkedServerId, (int)$existingCsId, $linkedServerId]);
                         }
 
                         // Auto-create or link domain record for this site

@@ -193,29 +193,10 @@ function insightsDiff(float $a, float $b, bool $lowerIsBetter = false): array
                 </div>
             </div>
 
-            <div id="chart-loading" class="hidden h-40 flex items-center justify-center text-sm text-slate-400">Loading…</div>
+            <div id="chart-loading" class="hidden h-64 flex items-center justify-center text-sm text-slate-400">Loading…</div>
 
-            <div id="chart-bars" class="flex items-end gap-2 h-40 overflow-x-auto">
-                <?php foreach ($months as $m):
-                    $hThis = $maxMonthVal > 0 ? max(2, round(($m['this_year'] / $maxMonthVal) * 136)) : 2;
-                    $hLast = $maxMonthVal > 0 ? max(2, round(($m['last_year'] / $maxMonthVal) * 136)) : 2;
-                    if ($m['this_year'] == 0) $hThis = 2;
-                    if ($m['last_year'] == 0) $hLast = 2;
-                ?>
-                <div class="flex flex-col items-center gap-0.5 shrink-0 min-w-[32px]"
-                     title="<?= e($m['label']) ?>: <?= money($m['this_year']) ?> vs prev <?= money($m['last_year']) ?>">
-                    <div class="flex items-end gap-0.5">
-                        <div class="w-3 bg-accent-500 rounded-t" style="height: <?= $hThis ?>px"></div>
-                        <div class="w-3 bg-slate-300 rounded-t" style="height: <?= $hLast ?>px"></div>
-                    </div>
-                    <span class="text-slate-400 text-center leading-none mt-1" style="font-size:9px"><?= e($m['label']) ?></span>
-                </div>
-                <?php endforeach ?>
-            </div>
-
-            <div class="flex gap-4 mt-3 text-xs text-slate-500">
-                <span class="flex items-center gap-1.5"><span class="inline-block w-3 h-3 rounded-sm bg-accent-500"></span> <span id="chart-legend-this">This year</span></span>
-                <span class="flex items-center gap-1.5"><span class="inline-block w-3 h-3 rounded-sm bg-slate-300"></span> <span id="chart-legend-prev">Previous year</span></span>
+            <div id="chart-bars" class="h-64">
+                <canvas id="monthly-chart"></canvas>
             </div>
         </div>
 
@@ -242,6 +223,74 @@ function insightsDiff(float $a, float $b, bool $lowerIsBetter = false): array
                 loadChart(newStart);
             };
 
+            // ── Monthly revenue / costs chart ─────────────────────────────
+            const seed = <?= json_encode(array_map(fn(array $m) => [
+                'label'      => $m['label'],
+                'this_year'  => (float)$m['this_year'],
+                'last_year'  => (float)$m['last_year'],
+                'this_costs' => (float)($m['this_costs'] ?? 0),
+            ], $months)) ?>;
+
+            let monthlyChart = null;
+
+            function datasets(months, labelThis, labelPrev) {
+                const C = window.CrmCharts;
+                return [
+                    {
+                        type: 'bar',
+                        label: labelThis,
+                        data: months.map(m => m.this_year),
+                        backgroundColor: C.colors.accent,
+                        borderRadius: 2,
+                        order: 2,
+                    },
+                    {
+                        type: 'bar',
+                        label: labelPrev,
+                        data: months.map(m => m.last_year),
+                        backgroundColor: C.colors.slate,
+                        borderRadius: 2,
+                        order: 3,
+                    },
+                    {
+                        type: 'line',
+                        label: 'Costs',
+                        data: months.map(m => m.this_costs),
+                        borderColor: C.colors.red,
+                        backgroundColor: C.colors.red,
+                        borderWidth: 2,
+                        pointRadius: 2,
+                        pointHoverRadius: 4,
+                        tension: 0.3,
+                        order: 1,
+                    },
+                ];
+            }
+
+            function buildMonthlyChart(months, labelThis, labelPrev) {
+                const C = window.CrmCharts;
+                const canvas = document.getElementById('monthly-chart');
+                if (!canvas || !C) return;
+
+                monthlyChart = new Chart(canvas, {
+                    data: {
+                        labels: months.map(m => m.label),
+                        datasets: datasets(months, labelThis, labelPrev),
+                    },
+                    options: {
+                        interaction: { mode: 'index', intersect: false },
+                        scales: {
+                            x: C.categoryScale(),
+                            y: C.moneyScale(),
+                        },
+                        plugins: {
+                            legend: { position: 'bottom' },
+                            tooltip: { callbacks: { label: C.moneyTooltip } },
+                        },
+                    },
+                });
+            }
+
             function loadChart(yearStart) {
                 document.getElementById('chart-loading').classList.remove('hidden');
                 document.getElementById('chart-bars').classList.add('hidden');
@@ -257,34 +306,32 @@ function insightsDiff(float $a, float $b, bool $lowerIsBetter = false): array
                         const label = data.year_label + (data.is_current ? ' (YTD)' : '');
                         document.getElementById('chart-year-label').textContent = label;
 
-                        const maxVal = Math.max(data.max_val, 1);
-                        const bars = document.getElementById('chart-bars');
-                        bars.innerHTML = '';
+                        const months = data.months.map(m => ({
+                            label:      m.label,
+                            this_year:  m.this_year,
+                            last_year:  m.last_year,
+                            this_costs: m.this_costs || 0,
+                        }));
 
-                        data.months.forEach(m => {
-                            const hThis = m.this_year > 0 ? Math.max(2, Math.round((m.this_year / maxVal) * 136)) : 2;
-                            const hLast = m.last_year > 0 ? Math.max(2, Math.round((m.last_year / maxVal) * 136)) : 2;
-                            const gbpThis = '£' + m.this_year.toLocaleString('en-GB', {minimumFractionDigits:2, maximumFractionDigits:2});
-                            const gbpLast = '£' + m.last_year.toLocaleString('en-GB', {minimumFractionDigits:2, maximumFractionDigits:2});
-
-                            bars.innerHTML += `
-                                <div class="flex flex-col items-center gap-0.5 shrink-0 min-w-[32px]"
-                                     title="${m.label}: ${gbpThis} vs prev ${gbpLast}">
-                                    <div class="flex items-end gap-0.5">
-                                        <div class="w-3 bg-accent-500 rounded-t" style="height:${hThis}px"></div>
-                                        <div class="w-3 bg-slate-300 rounded-t" style="height:${hLast}px"></div>
-                                    </div>
-                                    <span class="text-slate-400 text-center leading-none mt-1" style="font-size:9px">${m.label}</span>
-                                </div>`;
-                        });
+                        if (monthlyChart) {
+                            monthlyChart.data.labels = months.map(m => m.label);
+                            monthlyChart.data.datasets = datasets(months, data.year_label, 'Previous year');
+                            monthlyChart.update();
+                        } else {
+                            buildMonthlyChart(months, data.year_label, 'Previous year');
+                        }
 
                         document.getElementById('chart-loading').classList.add('hidden');
-                        bars.classList.remove('hidden');
+                        document.getElementById('chart-bars').classList.remove('hidden');
                     })
                     .catch(() => {
                         document.getElementById('chart-loading').textContent = 'Failed to load chart data.';
                     });
             }
+
+            document.addEventListener('DOMContentLoaded', function() {
+                buildMonthlyChart(seed, <?= json_encode($labelThis) ?>, <?= json_encode($labelLast) ?>);
+            });
 
             // When FY toggle changes, reset to current year
             document.querySelectorAll('a[href*="?fy="]').forEach(a => {
@@ -353,6 +400,27 @@ function insightsDiff(float $a, float $b, bool $lowerIsBetter = false): array
             <div class="px-5 py-3 border-b border-slate-200">
                 <h3 class="text-sm font-semibold text-slate-700">Revenue by Income Category</h3>
             </div>
+            <div class="px-5 py-4 border-b border-slate-100">
+                <div class="h-56">
+                    <canvas id="category-chart"></canvas>
+                </div>
+            </div>
+            <script>
+            (function() {
+                const cats = <?= json_encode(array_values(array_filter(array_map(fn(array $c) => [
+                    'label' => $c['category'],
+                    'value' => (float)$c['this_period'],
+                ], $categoryBreakdown), fn(array $c) => $c['value'] > 0))) ?>;
+
+                document.addEventListener('DOMContentLoaded', function() {
+                    const C = window.CrmCharts;
+                    const canvas = document.getElementById('category-chart');
+                    if (!canvas || !C) return;
+                    if (!cats.length) { C.empty(canvas, 'No categorised revenue this period.'); return; }
+                    C.doughnut(canvas, cats);
+                });
+            })();
+            </script>
             <div class="overflow-x-auto">
             <table class="w-full text-sm">
                 <thead class="bg-slate-50 text-xs text-slate-500 uppercase tracking-wide">
@@ -407,31 +475,77 @@ function insightsDiff(float $a, float $b, bool $lowerIsBetter = false): array
         }
         ?>
 
-        <!-- Horizontal bar chart -->
+        <!-- Revenue / costs / profit by year -->
         <div class="bg-white border border-slate-200 rounded-lg p-5 mb-4">
-            <h3 class="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-4">Profit by Year</h3>
-            <div class="space-y-2">
-                <?php foreach (array_reverse($yearlyPL) as $yr):
-                    $barPct = $maxAbsProfit > 0 ? min(100, (abs($yr['profit']) / $maxAbsProfit) * 100) : 0;
-                    $barColor = $yr['profit'] >= 0 ? 'bg-green-500' : 'bg-red-500';
-                ?>
-                <div class="flex items-center gap-3">
-                    <span class="text-xs text-slate-500 w-16 shrink-0 text-right <?= $yr['is_current'] ? 'font-bold text-slate-700' : '' ?>">
-                        <?= e($yr['label']) ?>
-                    </span>
-                    <div class="flex-1 flex items-center gap-2">
-                        <div class="flex-1 bg-slate-100 rounded h-5 relative overflow-hidden">
-                            <div class="h-full <?= $barColor ?> rounded"
-                                 style="width: <?= number_format($barPct, 1) ?>%"></div>
-                        </div>
-                        <span class="text-xs tabular-nums w-20 text-right <?= $yr['profit'] >= 0 ? 'text-green-700' : 'text-red-700' ?>">
-                            <?= money($yr['profit']) ?>
-                        </span>
-                    </div>
-                </div>
-                <?php endforeach ?>
+            <h3 class="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-4">Revenue, Costs &amp; Profit by Year</h3>
+            <div class="h-64">
+                <canvas id="yearly-pl-chart"></canvas>
             </div>
         </div>
+        <script>
+        (function() {
+            const rows = <?= json_encode(array_map(fn(array $y) => [
+                'label'   => $y['label'],
+                'revenue' => (float)$y['revenue'],
+                'costs'   => (float)$y['costs'],
+                'profit'  => (float)$y['profit'],
+                'margin'  => (float)$y['margin'],
+            ], array_reverse($yearlyPL))) ?>;
+
+            document.addEventListener('DOMContentLoaded', function() {
+                const C = window.CrmCharts;
+                const canvas = document.getElementById('yearly-pl-chart');
+                if (!canvas || !C) return;
+                if (!rows.length) { C.empty(canvas, 'No yearly data yet.'); return; }
+
+                new Chart(canvas, {
+                    data: {
+                        labels: rows.map(r => r.label),
+                        datasets: [
+                            {
+                                type: 'bar', label: 'Revenue',
+                                data: rows.map(r => r.revenue),
+                                backgroundColor: C.colors.accent,
+                                borderRadius: 2, order: 3,
+                            },
+                            {
+                                type: 'bar', label: 'Costs',
+                                data: rows.map(r => r.costs),
+                                backgroundColor: C.colors.slate,
+                                borderRadius: 2, order: 4,
+                            },
+                            {
+                                type: 'line', label: 'Profit',
+                                data: rows.map(r => r.profit),
+                                borderColor: C.colors.green,
+                                backgroundColor: C.colors.green,
+                                borderWidth: 2, pointRadius: 3, pointHoverRadius: 5,
+                                tension: 0.3, order: 1,
+                            },
+                        ],
+                    },
+                    options: {
+                        interaction: { mode: 'index', intersect: false },
+                        scales: { x: C.categoryScale(), y: C.moneyScale() },
+                        plugins: {
+                            legend: { position: 'bottom' },
+                            tooltip: {
+                                callbacks: {
+                                    label: C.moneyTooltip,
+                                    afterBody: function(items) {
+                                        const r = rows[items[0].dataIndex];
+                                        return r && r.revenue > 0
+                                            ? 'Margin: ' + r.margin.toFixed(1) + '%'
+                                            : '';
+                                    },
+                                },
+                            },
+                        },
+                    },
+                });
+            });
+        })();
+        </script>
 
         <!-- Table with expandable monthly detail -->
         <div class="bg-white border border-slate-200 rounded-lg overflow-hidden">
