@@ -1,3 +1,40 @@
+<?php
+/**
+ * Client cell for the invoice / recurring-invoice tables.
+ *
+ * An assigned row stays a plain link, with a pencil that swaps in the picker —
+ * previously the dropdown only rendered when client_id was NULL, so a row
+ * assigned to the wrong client (e.g. two FreeAgent contacts sharing an email)
+ * could not be corrected from the UI at all.
+ */
+function faClientCell(string $type, int $id, ?int $clientId, ?string $clientName, array $allClients): string
+{
+    $prefix = $type === 'invoices' ? 'inv' : 'ri';
+    $editId = "fa-{$prefix}-edit-{$id}";
+
+    $select = '<select onchange="assignFaClient(' . json_encode($type) . ', ' . $id . ', this)"'
+        . ' class="border border-slate-200 rounded px-2 py-0.5 text-xs text-slate-500 focus:outline-none focus:ring-1 focus:ring-accent-400">'
+        . '<option value="">— Unassigned —</option>';
+    foreach ($allClients as $c) {
+        $sel = $clientId === (int)$c['id'] ? ' selected' : '';
+        $select .= '<option value="' . (int)$c['id'] . '"' . $sel . '>' . e($c['name']) . '</option>';
+    }
+    $select .= '</select>';
+
+    if (!$clientId) {
+        return $select;
+    }
+
+    return '<div class="flex items-center gap-1">'
+         . '<a href="/clients/' . $clientId . '" class="text-accent-600 hover:underline">' . e($clientName ?? 'Unknown') . '</a>'
+         . '<button type="button" onclick="toggleFaClientEdit(' . json_encode($editId) . ')"'
+         . ' class="text-slate-300 hover:text-slate-500 shrink-0" title="Change client">'
+         . '<svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">'
+         . '<path stroke-linecap="round" stroke-linejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"/>'
+         . '</svg></button></div>'
+         . '<div id="' . $editId . '" class="hidden mt-1">' . $select . '</div>';
+}
+?>
 <?php if (!$connected): ?>
 
 <div class="max-w-lg space-y-4">
@@ -216,17 +253,7 @@
                 ?>
                     <tr class="hover:bg-slate-50 ri-row" data-status="<?= e($ri['recurring_status']) ?>">
                         <td class="px-4 py-2.5 font-medium" data-value="<?= e($ri['client_name'] ?? '') ?>" id="fa-ri-client-<?= $ri['id'] ?>">
-                            <?php if ($ri['client_id']): ?>
-                                <a href="/clients/<?= $ri['client_id'] ?>" class="text-accent-600 hover:underline"><?= e($ri['client_name'] ?? 'Unknown') ?></a>
-                            <?php else: ?>
-                                <select onchange="assignFaClient('recurring', <?= $ri['id'] ?>, this)"
-                                        class="border border-slate-200 rounded px-2 py-0.5 text-xs text-slate-500 focus:outline-none focus:ring-1 focus:ring-accent-400">
-                                    <option value="">— Assign client —</option>
-                                    <?php foreach ($allClients as $c): ?>
-                                        <option value="<?= $c['id'] ?>"><?= e($c['name']) ?></option>
-                                    <?php endforeach ?>
-                                </select>
-                            <?php endif ?>
+                            <?= faClientCell('recurring', (int)$ri['id'], $ri['client_id'] ? (int)$ri['client_id'] : null, $ri['client_name'] ?? null, $allClients) ?>
                         </td>
                         <?php
                             // FreeAgent's `reference` on a recurring template is a bank payment
@@ -392,17 +419,7 @@
                     ?>
                     <tr class="hover:bg-slate-50">
                         <td class="px-4 py-2.5" id="fa-inv-client-<?= $inv['id'] ?>">
-                            <?php if ($inv['client_id']): ?>
-                                <a href="/clients/<?= $inv['client_id'] ?>" class="text-accent-600 hover:underline"><?= e($inv['client_name'] ?? '—') ?></a>
-                            <?php else: ?>
-                                <select onchange="assignFaClient('invoices', <?= $inv['id'] ?>, this)"
-                                        class="border border-slate-200 rounded px-2 py-0.5 text-xs text-slate-500 focus:outline-none focus:ring-1 focus:ring-accent-400">
-                                    <option value="">— Assign client —</option>
-                                    <?php foreach ($allClients as $c): ?>
-                                        <option value="<?= $c['id'] ?>"><?= e($c['name']) ?></option>
-                                    <?php endforeach ?>
-                                </select>
-                            <?php endif ?>
+                            <?= faClientCell('invoices', (int)$inv['id'], $inv['client_id'] ? (int)$inv['client_id'] : null, $inv['client_name'] ?? null, $allClients) ?>
                         </td>
                         <td class="px-4 py-2.5 font-mono text-xs">
                             <?php if ($isHiveage): ?>
@@ -529,12 +546,17 @@ function filterUnpaid(status) {
 document.addEventListener('DOMContentLoaded', () => filterUnpaid('all'));
 
 // ── Inline client assignment (invoices + recurring) ───────────────────────
+function toggleFaClientEdit(id) {
+    document.getElementById(id)?.classList.toggle('hidden');
+}
+
 function assignFaClient(type, id, select) {
     const clientId = select.value;
-    if (!clientId) return;
     const cell = document.getElementById('fa-' + (type === 'invoices' ? 'inv' : 'ri') + '-client-' + id);
     const url  = type === 'invoices' ? '/freeagent/invoices/' + id + '/client'
                                      : '/freeagent/recurring/' + id + '/client';
+    const previous = select.dataset.previous ?? '';
+
     fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -542,11 +564,18 @@ function assignFaClient(type, id, select) {
     })
     .then(r => r.json())
     .then(data => {
-        if (data.ok) {
-            cell.innerHTML = '<a href="/clients/' + clientId + '" class="text-accent-600 hover:underline">' + data.client_name + '</a>';
+        if (!data.ok) throw new Error(data.error || 'failed');
+        select.dataset.previous = clientId;
+        if (clientId) {
+            const esc = document.createElement('div');
+            esc.textContent = data.client_name || 'Unknown';
+            cell.innerHTML = '<a href="/clients/' + encodeURIComponent(clientId) + '" '
+                + 'class="text-accent-600 hover:underline">' + esc.innerHTML + '</a>';
+        } else {
+            cell.innerHTML = '<span class="text-amber-600 text-xs font-medium">Unassigned</span>';
         }
     })
-    .catch(() => select.value = '');
+    .catch(() => { select.value = previous; alert('Could not reassign — please try again.'); });
 }
 
 function runSync() {

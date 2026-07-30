@@ -306,8 +306,15 @@ class SettingsController
         $this->db->prepare("UPDATE freeagent_contacts SET client_id = ?, auto_matched = 0 WHERE id = ?")->execute([$clientId, $id]);
         $contact = $this->db->prepare("SELECT freeagent_url FROM freeagent_contacts WHERE id = ?");
         $contact->execute([$id]);
-        if ($row = $contact->fetch()) $this->db->prepare("UPDATE freeagent_invoices SET client_id = ? WHERE freeagent_contact_url = ?")->execute([$clientId, $row['freeagent_url']]);
-        flash('success', 'Contact mapping saved.');
+        if ($row = $contact->fetch()) {
+            $this->db->prepare("UPDATE freeagent_invoices SET client_id = ? WHERE freeagent_contact_url = ?")
+                ->execute([$clientId, $row['freeagent_url']]);
+            // Recurring invoices too, otherwise re-pointing a contact moves its
+            // invoices but strands its MRR on the old client until a full sync.
+            $this->db->prepare("UPDATE freeagent_recurring_invoices SET client_id = ? WHERE freeagent_contact_url = ?")
+                ->execute([$clientId, $row['freeagent_url']]);
+        }
+        flash('success', 'Contact mapping saved. Invoices and recurring income re-pointed.');
         redirect('/settings/freeagent/contacts');
     }
 
@@ -324,6 +331,7 @@ class SettingsController
         $clientId = (int)$this->db->lastInsertId();
         $this->db->prepare("UPDATE freeagent_contacts SET client_id = ?, auto_matched = 0 WHERE id = ?")->execute([$clientId, $id]);
         $this->db->prepare("UPDATE freeagent_invoices SET client_id = ? WHERE freeagent_contact_url = ?")->execute([$clientId, $contact['freeagent_url']]);
+        $this->db->prepare("UPDATE freeagent_recurring_invoices SET client_id = ? WHERE freeagent_contact_url = ?")->execute([$clientId, $contact['freeagent_url']]);
         header('Content-Type: application/json'); echo json_encode(['ok' => true, 'client_id' => $clientId, 'client_name' => $name]); exit;
     }
 
