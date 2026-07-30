@@ -12,7 +12,9 @@ function faClientCell(string $type, int $id, ?int $clientId, ?string $clientName
     $prefix = $type === 'invoices' ? 'inv' : 'ri';
     $editId = "fa-{$prefix}-edit-{$id}";
 
-    $select = '<select onchange="assignFaClient(' . json_encode($type) . ', ' . $id . ', this)"'
+    // Single-quoted JS string literals: the surrounding HTML attribute is
+    // double-quoted, so json_encode()'s double quotes would close it early.
+    $select = '<select onchange="assignFaClient(\'' . e($type) . '\', ' . $id . ', this)"'
         . ' class="border border-slate-200 rounded px-2 py-0.5 text-xs text-slate-500 focus:outline-none focus:ring-1 focus:ring-accent-400">'
         . '<option value="">— Unassigned —</option>';
     foreach ($allClients as $c) {
@@ -27,7 +29,7 @@ function faClientCell(string $type, int $id, ?int $clientId, ?string $clientName
 
     return '<div class="flex items-center gap-1">'
          . '<a href="/clients/' . $clientId . '" class="text-accent-600 hover:underline">' . e($clientName ?? 'Unknown') . '</a>'
-         . '<button type="button" onclick="toggleFaClientEdit(' . json_encode($editId) . ')"'
+         . '<button type="button" onclick="toggleFaClientEdit(\'' . e($editId) . '\')"'
          . ' class="text-slate-300 hover:text-slate-500 shrink-0" title="Change client">'
          . '<svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">'
          . '<path stroke-linecap="round" stroke-linejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"/>'

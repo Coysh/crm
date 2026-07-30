@@ -157,6 +157,19 @@ git pull origin main
 
 Only `data/` (DB + `app.key`) should ever differ on the server; those are gitignored.
 
+**Cloudflare settings for the CRM hostname.** Turn **Rocket Loader off** — it rewrites
+inline `on*` handlers and defers inline `<script>` blocks, both of which this app relies
+on throughout (it is also what surfaces any malformed handler attribute as a wall of
+`Failed to read the 'onclick' property` errors). **Web Analytics / Browser Insights**
+should also be off: it injects `static.cloudflareinsights.com/beacon.min.js`, which the
+CSP (`script-src 'self'`) blocks. Prefer disabling it over widening the CSP — this app
+holds client financial data and OAuth tokens.
+
+When writing inline handlers, remember the attribute is double-quoted: pass JS strings as
+single-quoted literals, or wrap `json_encode()` in `htmlspecialchars(..., ENT_QUOTES)` as
+`clients/index.php` and `sites/matching.php` do. A bare `json_encode()` closes the
+attribute early.
+
 ## Design Guidelines
 
 - Slate/gray Tailwind palette with a single accent colour
