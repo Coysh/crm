@@ -25,6 +25,61 @@
         <span class="text-amber-600"><strong><?= $stats['unmatched'] ?></strong> unmatched</span>
     </div>
 
+    <!-- Shared-email collisions -->
+    <?php if (!empty($collisions)): ?>
+        <?php $bad = array_filter($collisions, fn($g) => $g['distinct_clients'] <= 1); ?>
+        <div class="bg-white border <?= $bad ? 'border-amber-300' : 'border-slate-200' ?> rounded-lg overflow-hidden">
+            <div class="px-5 py-3 border-b <?= $bad ? 'border-amber-200 bg-amber-50' : 'border-slate-200' ?>">
+                <h2 class="text-sm font-semibold <?= $bad ? 'text-amber-800' : 'text-slate-700' ?>">
+                    <?= count($collisions) ?> email address<?= count($collisions) !== 1 ? 'es' : '' ?> shared by multiple contacts
+                </h2>
+                <p class="text-xs <?= $bad ? 'text-amber-700' : 'text-slate-500' ?> mt-0.5">
+                    <?php if ($bad): ?>
+                        <strong><?= count($bad) ?></strong> of these have every contact pointing at a single client — those
+                        contacts' invoices are all being attributed to that one client. Pick the right client below to fix it;
+                        the contact's invoices are re-pointed immediately.
+                    <?php else: ?>
+                        All are mapped to distinct clients, so nothing is being mis-attributed.
+                    <?php endif ?>
+                </p>
+            </div>
+            <div class="divide-y divide-slate-100">
+                <?php foreach ($collisions as $email => $group): ?>
+                    <div class="px-5 py-3">
+                        <div class="flex items-center gap-2 mb-1.5">
+                            <span class="font-mono text-xs text-slate-600"><?= e($email) ?></span>
+                            <?php if ($group['distinct_clients'] <= 1): ?>
+                                <span class="inline-block px-1.5 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-700">
+                                    all on one client
+                                </span>
+                            <?php else: ?>
+                                <span class="inline-block px-1.5 py-0.5 rounded text-xs font-medium bg-slate-100 text-slate-600">
+                                    <?= $group['distinct_clients'] ?> clients
+                                </span>
+                            <?php endif ?>
+                        </div>
+                        <ul class="text-xs text-slate-500 space-y-0.5">
+                            <?php foreach ($group['contacts'] as $c): ?>
+                                <li class="flex flex-wrap items-center gap-1.5">
+                                    <span class="text-slate-700"><?= e($c['organisation_name'] ?: $c['name']) ?></span>
+                                    <span class="text-slate-300">→</span>
+                                    <?php if ($c['client_id']): ?>
+                                        <a href="/clients/<?= $c['client_id'] ?>" class="text-accent-600 hover:underline"><?= e($c['client_name']) ?></a>
+                                        <?php if (empty($c['auto_matched'])): ?>
+                                            <span class="text-blue-600">(manual)</span>
+                                        <?php endif ?>
+                                    <?php else: ?>
+                                        <span class="text-amber-600">unmatched</span>
+                                    <?php endif ?>
+                                </li>
+                            <?php endforeach ?>
+                        </ul>
+                    </div>
+                <?php endforeach ?>
+            </div>
+        </div>
+    <?php endif ?>
+
     <?php if (!$contacts): ?>
         <div class="bg-white border border-slate-200 rounded-lg p-8 text-center text-sm text-slate-400">
             No FreeAgent contacts synced yet.
@@ -48,7 +103,13 @@
                     <?php $unmatched = !$contact['client_id']; ?>
                     <tr class="<?= $unmatched ? 'bg-amber-50' : 'hover:bg-slate-50' ?>">
                         <td class="px-4 py-2.5 font-medium"><?= freeagentLink($contact['freeagent_url'] ?? null, $contact['name'], 'font-medium') ?></td>
-                        <td class="px-4 py-2.5 text-slate-500 text-xs"><?= e($contact['email'] ?: '—') ?></td>
+                        <td class="px-4 py-2.5 text-slate-500 text-xs">
+                            <?= e($contact['email'] ?: '—') ?>
+                            <?php if ($contact['email'] && in_array(strtolower(trim($contact['email'])), $sharedEmails, true)): ?>
+                                <span class="ml-1 inline-block px-1 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-700"
+                                      title="Shared with another FreeAgent contact — auto-matching can't use this email, so check the client is right.">shared</span>
+                            <?php endif ?>
+                        </td>
                         <td class="px-4 py-2.5" id="client-label-<?= $contact['id'] ?>">
                             <?= $contact['client_name'] ? e($contact['client_name']) : '<span class="text-slate-300">Unmatched</span>' ?>
                         </td>

@@ -450,7 +450,30 @@ class FreeAgentSync
         }
     }
 
-    public function rematchContacts(): int { $contacts = $this->db->query("SELECT id, name, organisation_name, email FROM freeagent_contacts")->fetchAll(); $m=0; foreach($contacts as $c){$clientId=$this->autoMatchClient($c['organisation_name'] ?: $c['name'], $c['email']); if($clientId){$this->db->prepare("UPDATE freeagent_contacts SET client_id = ?, auto_matched = 1 WHERE id = ?")->execute([$clientId,$c['id']]);$m++;}} return $m; }
+    /**
+     * Re-run auto-matching over contacts. Contacts mapped by hand
+     * (auto_matched = 0) are left alone — re-matching used to overwrite every
+     * contact, silently undoing manual corrections.
+     */
+    public function rematchContacts(): int
+    {
+        $contacts = $this->db->query(
+            "SELECT id, name, organisation_name, email
+             FROM freeagent_contacts
+             WHERE auto_matched = 1 OR client_id IS NULL"
+        )->fetchAll();
+
+        $m = 0;
+        foreach ($contacts as $c) {
+            $clientId = $this->autoMatchClient((string)($c['organisation_name'] ?: $c['name']), $c['email']);
+            if ($clientId) {
+                $this->db->prepare("UPDATE freeagent_contacts SET client_id = ?, auto_matched = 1 WHERE id = ?")
+                    ->execute([$clientId, $c['id']]);
+                $m++;
+            }
+        }
+        return $m;
+    }
 
     private function ensureClientForContact(string $contactUrl): ?int
     {
@@ -480,11 +503,45 @@ class FreeAgentSync
         }
     }
 
+    /**
+     * Resolve a FreeAgent contact to a CRM client.
+     *
+     * Name is tried before email. Several FreeAgent contacts routinely share one
+     * email address (an agency, a family business, one admin across sites), and
+     * matching on email first merged them all onto whichever client that email
+     * happened to hit — so every contact's invoices landed on one client.
+     *
+     * Email is therefore only trusted when it is unique across FreeAgent
+     * contacts. When it is shared and the name doesn't match, no match is
+     * returned: better to leave it for manual mapping (or auto-create) than to
+     * silently attribute another business's revenue to the wrong client.
+     */
     private function autoMatchClient(string $name, ?string $email): ?int
     {
-        if ($email) { $row = $this->db->prepare("SELECT id FROM clients WHERE LOWER(contact_email) = LOWER(?) LIMIT 1"); $row->execute([$email]); if ($r=$row->fetch()) return (int)$r['id']; }
-        $row = $this->db->prepare("SELECT id FROM clients WHERE LOWER(name) = LOWER(?) LIMIT 1"); $row->execute([$name]); if ($r=$row->fetch()) return (int)$r['id'];
+        $name = trim($name);
+        if ($name !== '') {
+            $row = $this->db->prepare("SELECT id FROM clients WHERE LOWER(name) = LOWER(?) LIMIT 1");
+            $row->execute([$name]);
+            if ($r = $row->fetch()) return (int)$r['id'];
+        }
+
+        if ($email !== null && trim($email) !== '' && !$this->isSharedContactEmail($email)) {
+            $row = $this->db->prepare("SELECT id FROM clients WHERE LOWER(contact_email) = LOWER(?) LIMIT 1");
+            $row->execute([$email]);
+            if ($r = $row->fetch()) return (int)$r['id'];
+        }
+
         return null;
+    }
+
+    /** True when more than one FreeAgent contact uses this email address. */
+    private function isSharedContactEmail(string $email): bool
+    {
+        $stmt = $this->db->prepare(
+            "SELECT COUNT(*) FROM freeagent_contacts WHERE email IS NOT NULL AND LOWER(email) = LOWER(?)"
+        );
+        $stmt->execute([$email]);
+        return (int)$stmt->fetchColumn() > 1;
     }
 
     private function mapFaCategory(string $faCategory, string $type): ?string { $row = $this->db->prepare("SELECT local_category FROM freeagent_category_mappings WHERE freeagent_category = ? AND type = ? LIMIT 1"); $row->execute([$faCategory,$type]); $r=$row->fetch(); return $r?$r['local_category']:null; }

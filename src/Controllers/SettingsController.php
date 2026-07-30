@@ -275,9 +275,29 @@ class SettingsController
         $contacts = $this->db->query("SELECT fc.*, c.name AS client_name FROM freeagent_contacts fc LEFT JOIN clients c ON c.id = fc.client_id ORDER BY fc.client_id IS NULL DESC, fc.name")->fetchAll();
         $clients = $this->db->query("SELECT id, name FROM clients WHERE status = 'active' ORDER BY name")->fetchAll();
         $stats = ['total' => count($contacts), 'auto' => count(array_filter($contacts, fn($r) => $r['client_id'] && $r['auto_matched'])), 'manual' => count(array_filter($contacts, fn($r) => $r['client_id'] && !$r['auto_matched'])), 'unmatched' => count(array_filter($contacts, fn($r) => !$r['client_id']))];
+
+        // Contacts sharing an email address. Auto-matching used to key on email,
+        // so these are the ones most likely mapped to the wrong client — and
+        // several distinct businesses can end up funnelling into one.
+        $emailCounts = [];
+        foreach ($contacts as $c) {
+            $e = strtolower(trim((string)($c['email'] ?? '')));
+            if ($e !== '') $emailCounts[$e] = ($emailCounts[$e] ?? 0) + 1;
+        }
+        $sharedEmails = array_keys(array_filter($emailCounts, fn($n) => $n > 1));
+
+        // Group the collisions so the page can show which contacts collide and
+        // whether they've been funnelled onto a single client.
+        $collisions = [];
+        foreach ($sharedEmails as $e) {
+            $group = array_values(array_filter($contacts, fn($c) => strtolower(trim((string)($c['email'] ?? ''))) === $e));
+            $distinctClients = array_unique(array_filter(array_map(fn($c) => $c['client_id'], $group)));
+            $collisions[$e] = ['contacts' => $group, 'distinct_clients' => count($distinctClients)];
+        }
+        $stats['shared_email'] = count(array_filter($collisions, fn($g) => $g['distinct_clients'] <= 1));
         $connected = $this->fa->isConnected();
         $breadcrumbs = [['Settings', '/settings'], ['FreeAgent', '/settings/freeagent'], ['Contact Mapping', null]];
-        render('settings.fa_contacts', compact('contacts', 'clients', 'stats', 'connected', 'breadcrumbs'), 'Contact Mapping');
+        render('settings.fa_contacts', compact('contacts', 'clients', 'stats', 'connected', 'breadcrumbs', 'sharedEmails', 'collisions'), 'Contact Mapping');
     }
 
     public function saveContactMap(int $id): void
