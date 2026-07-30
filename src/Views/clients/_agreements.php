@@ -57,6 +57,23 @@ $typeLabels = \CoyshCRM\Models\Agreement::TYPES;
                         <?php if (!empty($a['recurring_reference'])): ?>
                             <span><span class="font-medium text-slate-600">Billed via:</span> <?= e($a['recurring_reference']) ?> (<?= e($a['recurring_status'] ?? '—') ?>)</span>
                         <?php endif ?>
+                        <?php
+                        // Make the revenue treatment explicit: an active agreement with no
+                        // linked recurring invoice is what supplies this client's MRR.
+                        $cycleMonthly = ['monthly' => 1, 'quarterly' => 3, 'annually' => 12];
+                        $divisor = $cycleMonthly[$a['fee_billing_cycle'] ?? ''] ?? null;
+                        if ($a['status'] === 'active' && $a['fee_amount'] !== null && $divisor):
+                            if (empty($a['freeagent_recurring_invoice_id'])): ?>
+                                <span class="text-slate-500">
+                                    <span class="font-medium text-slate-600">Counted as MRR:</span>
+                                    <?= money((float)$a['fee_amount'] / $divisor) ?> / month
+                                </span>
+                            <?php else: ?>
+                                <span class="text-slate-400" title="Counted through the linked recurring invoice, not the agreement fee — avoids double counting.">
+                                    Not counted separately
+                                </span>
+                            <?php endif ?>
+                        <?php endif ?>
                         <?php if (!empty($a['start_date'])): ?>
                             <span><span class="font-medium text-slate-600">Started:</span> <?= formatDate($a['start_date']) ?></span>
                         <?php endif ?>

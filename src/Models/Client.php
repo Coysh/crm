@@ -11,11 +11,13 @@ class Client extends Model
     public function findAllWithStats(?string $status = null): array
     {
         $mrrSql = FreeAgentRecurringInvoice::monthlySql();
+        $agrSql = $this->agreementMrrSql('c.id');
         $sql = "SELECT c.*,
             (SELECT COUNT(*) FROM client_sites cs WHERE cs.client_id = c.id) AS site_count,
             (SELECT COALESCE(SUM($mrrSql), 0)
              FROM freeagent_recurring_invoices fri
-             WHERE fri.client_id = c.id AND fri.recurring_status = 'Active') AS mrr
+             WHERE fri.client_id = c.id AND fri.recurring_status = 'Active')
+            + $agrSql AS mrr
         FROM clients c";
         $params = [];
         if ($status) { $sql .= ' WHERE c.status = ?'; $params[] = $status; }
@@ -39,13 +41,17 @@ class Client extends Model
             ? ", (CASE WHEN EXISTS(SELECT 1 FROM cloudflare_zones cz JOIN domains d ON d.id = cz.domain_id WHERE d.client_id = c.id) THEN 1 ELSE 0 END) AS has_cloudflare"
             : ", 0 AS has_cloudflare";
 
+        $agrSql = $this->agreementMrrSql('c.id');
+
         $sql = "SELECT c.*,
             (SELECT COUNT(*) FROM client_sites cs WHERE cs.client_id = c.id) AS site_count,
             (SELECT COALESCE(SUM($mrrSql), 0)
              FROM freeagent_recurring_invoices fri
-             WHERE fri.client_id = c.id AND fri.recurring_status = 'Active') AS mrr,
+             WHERE fri.client_id = c.id AND fri.recurring_status = 'Active')
+            + $agrSql AS mrr,
             (CASE WHEN EXISTS(SELECT 1 FROM freeagent_recurring_invoices fri
-                WHERE fri.client_id = c.id AND fri.recurring_status = 'Active') THEN 1 ELSE 0 END) AS has_recurring,
+                WHERE fri.client_id = c.id AND fri.recurring_status = 'Active')
+                OR $agrSql > 0 THEN 1 ELSE 0 END) AS has_recurring,
             (SELECT COALESCE(SUM(COALESCE(fi.net_value, fi.total_value)), 0)
              FROM freeagent_invoices fi WHERE fi.client_id = c.id
                AND COALESCE(fi.status_override, fi.status) IN ('paid','sent','overdue')) AS total_invoiced,
@@ -154,7 +160,18 @@ class Client extends Model
              WHERE client_id = ? AND recurring_status = 'Active'",
             [$id]
         )->fetch();
-        return (float)$row['mrr'];
+        $mrr = (float)$row['mrr'];
+
+        // Plus any active agreement not billed through a linked recurring invoice.
+        if ($this->hasAgreementsTable()) {
+            $agr = $this->query(
+                "SELECT " . Agreement::unlinkedMrrSql('?') . " AS agreement_mrr",
+                [$id]
+            )->fetch();
+            $mrr += (float)($agr['agreement_mrr'] ?? 0);
+        }
+
+        return $mrr;
     }
 
     public function getMonthlyDomainCost(int $clientId): float
@@ -206,6 +223,35 @@ class Client extends Model
     }
 
     /** Check once whether recurring_costs.currency column exists (migration 014). */
+    /**
+     * Whether the agreements table is present (tolerates partially-migrated DBs,
+     * same feature-detection pattern as hasCurrencyColumn()).
+     */
+    private function hasAgreementsTable(): bool
+    {
+        static $checked = null;
+        if ($checked !== null) return $checked;
+        try {
+            $this->query("SELECT id FROM agreements LIMIT 0");
+            $checked = true;
+        } catch (\Throwable) {
+            $checked = false;
+        }
+        return $checked;
+    }
+
+    /**
+     * Monthly-equivalent fees from active agreements that aren't billed through a
+     * linked FreeAgent recurring invoice. Returns '0' when the table is absent so
+     * callers can always interpolate it into their SELECT.
+     */
+    private function agreementMrrSql(string $clientIdExpr): string
+    {
+        return $this->hasAgreementsTable()
+            ? Agreement::unlinkedMrrSql($clientIdExpr)
+            : '0';
+    }
+
     private function hasCurrencyColumn(): bool
     {
         static $checked = null;
@@ -415,6 +461,23 @@ class Client extends Model
             if (isset($pl[(int)$r['client_id']])) $pl[(int)$r['client_id']]['mrr'] = (float)$r['mrr'];
         }
 
+        // Agreements billed outside FreeAgent add to MRR (linked ones are already
+        // counted above via their recurring invoice).
+        if ($this->hasAgreementsTable()) {
+            $agrSql = Agreement::monthlySql('ag');
+            foreach ($this->query(
+                "SELECT ag.client_id, COALESCE(SUM($agrSql), 0) AS mrr
+                 FROM agreements ag
+                 WHERE ag.status = 'active'
+                   AND ag.freeagent_recurring_invoice_id IS NULL
+                   AND ag.client_id IS NOT NULL
+                 GROUP BY ag.client_id"
+            )->fetchAll() as $r) {
+                $cid = (int)$r['client_id'];
+                if (isset($pl[$cid])) $pl[$cid]['mrr'] += (float)$r['mrr'];
+            }
+        }
+
         // Domains — FX-converted per row, matching getMonthlyDomainCost()
         $fx = $this->hasCurrencyColumn() ? $this->fx() : null;
         foreach ($this->query(
@@ -506,12 +569,20 @@ class Client extends Model
         $pl = $this->getPL($clientId);
         if ($pl['profit'] < 0) $flags[] = 'loss_making';
 
-        // Consultancy-only clients aren't expected to have a retainer
+        // Consultancy-only clients aren't expected to have a retainer.
+        // An active agreement counts as a retainer even when it isn't billed
+        // through a FreeAgent recurring invoice.
         if ($clientType !== 'consultancy_only') {
             $hasRetainer = (bool)$this->query(
                 "SELECT 1 FROM freeagent_recurring_invoices WHERE client_id = ? AND recurring_status = 'Active' LIMIT 1",
                 [$clientId]
             )->fetchColumn();
+            if (!$hasRetainer && $this->hasAgreementsTable()) {
+                $hasRetainer = (bool)$this->query(
+                    "SELECT 1 FROM agreements WHERE client_id = ? AND status = 'active' LIMIT 1",
+                    [$clientId]
+                )->fetchColumn();
+            }
             if (!$hasRetainer) $flags[] = 'no_retainer';
         }
 
@@ -586,10 +657,16 @@ class Client extends Model
         $activeClients = $this->query("SELECT id, COALESCE(client_type,'managed') AS client_type, COALESCE(agreement_notes,'') AS agreement_notes FROM clients WHERE status = 'active'")->fetchAll();
         if (!$activeClients) return [];
 
-        // Aggregate: has active retainer
+        // Aggregate: has active retainer — an Active FreeAgent recurring invoice,
+        // or an active agreement (which may be billed outside FreeAgent).
         $retainerIds = $this->query(
             "SELECT DISTINCT client_id FROM freeagent_recurring_invoices WHERE recurring_status = 'Active' AND client_id IS NOT NULL"
         )->fetchAll(\PDO::FETCH_COLUMN);
+        if ($this->hasAgreementsTable()) {
+            $retainerIds = array_merge($retainerIds, $this->query(
+                "SELECT DISTINCT client_id FROM agreements WHERE status = 'active' AND client_id IS NOT NULL"
+            )->fetchAll(\PDO::FETCH_COLUMN));
+        }
         $retainerSet = array_flip($retainerIds);
 
         // Aggregate: has recent invoice

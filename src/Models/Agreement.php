@@ -19,6 +19,43 @@ class Agreement extends Model
     public const HOURS_PERIODS = ['monthly', 'quarterly', 'annually'];
     public const BILLING_CYCLES = ['monthly', 'quarterly', 'annually', 'one_off'];
 
+    /**
+     * SQL normalising an agreement's fee to a monthly equivalent, mirroring
+     * FreeAgentRecurringInvoice::monthlySql(). `one_off` fees are not recurring
+     * revenue and normalise to 0.
+     */
+    public static function monthlySql(string $alias = ''): string
+    {
+        $p = $alias ? "{$alias}." : '';
+        // Float divisors — fee_amount has integer affinity in SQLite, so `/ 12`
+        // would truncate a £400 annual fee to £33 instead of £33.33.
+        return "CASE {$p}fee_billing_cycle
+            WHEN 'monthly'   THEN COALESCE({$p}fee_amount, 0)
+            WHEN 'quarterly' THEN COALESCE({$p}fee_amount, 0) / 3.0
+            WHEN 'annually'  THEN COALESCE({$p}fee_amount, 0) / 12.0
+            ELSE 0
+        END";
+    }
+
+    /**
+     * Correlated subquery summing the monthly-equivalent fees of a client's
+     * active agreements that are NOT linked to a FreeAgent recurring invoice.
+     *
+     * Linked agreements are excluded because the recurring invoice they point at
+     * is already counted as revenue — counting both would double the client's MRR.
+     *
+     * @param string $clientIdExpr SQL expression for the client id (e.g. 'c.id')
+     */
+    public static function unlinkedMrrSql(string $clientIdExpr): string
+    {
+        $fee = self::monthlySql('ag');
+        return "(SELECT COALESCE(SUM($fee), 0)
+                 FROM agreements ag
+                 WHERE ag.client_id = $clientIdExpr
+                   AND ag.status = 'active'
+                   AND ag.freeagent_recurring_invoice_id IS NULL)";
+    }
+
     /** All agreements for one client, with usage and attachment counts attached. */
     public function findByClient(int $clientId): array
     {

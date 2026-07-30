@@ -44,16 +44,19 @@ class FreeAgentRecurringInvoice extends Model
         $p   = $alias ? "{$alias}." : '';
         $tv  = "COALESCE({$p}net_value, {$p}total_value)";
         $frq = "{$p}frequency";
+        // Divisors are floats: SQLite gives these columns integer affinity, so a
+        // whole-pound value like 850 would otherwise hit integer division and
+        // truncate (850 / 12 = 70, not 70.83), silently understating MRR.
         return "CASE {$frq}
-            WHEN 'Weekly'      THEN {$tv} * 52 / 12
-            WHEN 'Two Weekly'  THEN {$tv} * 26 / 12
-            WHEN 'Four Weekly' THEN {$tv} * 13 / 12
+            WHEN 'Weekly'      THEN {$tv} * 52 / 12.0
+            WHEN 'Two Weekly'  THEN {$tv} * 26 / 12.0
+            WHEN 'Four Weekly' THEN {$tv} * 13 / 12.0
             WHEN 'Monthly'     THEN {$tv}
-            WHEN 'Two Monthly' THEN {$tv} / 2
-            WHEN 'Quarterly'   THEN {$tv} / 3
-            WHEN 'Biannually'  THEN {$tv} / 6
-            WHEN 'Annually'    THEN {$tv} / 12
-            WHEN '2-Yearly'    THEN {$tv} / 24
+            WHEN 'Two Monthly' THEN {$tv} / 2.0
+            WHEN 'Quarterly'   THEN {$tv} / 3.0
+            WHEN 'Biannually'  THEN {$tv} / 6.0
+            WHEN 'Annually'    THEN {$tv} / 12.0
+            WHEN '2-Yearly'    THEN {$tv} / 24.0
             ELSE {$tv}
         END";
     }
