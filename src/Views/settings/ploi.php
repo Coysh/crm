@@ -154,6 +154,76 @@
     </div>
     <?php endif ?>
 
+    <!-- Duplicate CRM site records left by a server migration -->
+    <?php if (!empty($duplicateSites)): ?>
+    <div class="bg-white border border-amber-200 rounded-lg p-6 space-y-4">
+        <div>
+            <h2 class="text-sm font-semibold text-slate-700">Duplicate Site Records</h2>
+            <p class="text-xs text-slate-500 mt-1">
+                These domains have two CRM site records: the one you built up, stranded on a server that is
+                no longer in Ploi, and an empty one the sync created when the site came back on its new
+                server. Merging keeps the record with the client on it, moves it to the new server, and
+                deletes the empty one.
+            </p>
+        </div>
+
+        <form method="POST" action="/settings/ploi/duplicates/merge" class="space-y-3"
+              onsubmit="return confirm('Merge the selected duplicates? The empty record is deleted and its Ploi site attaches to the record you keep.')">
+            <?= csrfField() ?>
+
+            <?php if (count($duplicateSites) > 1): ?>
+                <div class="flex flex-wrap items-center gap-2 text-xs text-slate-500">
+                    <span><?= count($duplicateSites) ?> duplicates</span>
+                    <button type="button" class="px-2 py-1 border border-slate-300 rounded hover:bg-slate-50" onclick="dupSetAll(true)">Select all</button>
+                    <button type="button" class="px-2 py-1 border border-slate-300 rounded hover:bg-slate-50" onclick="dupSetAll(false)">Select none</button>
+                </div>
+                <script>
+                    function dupSetAll(state) {
+                        document.querySelectorAll('input[type=checkbox][name="merge[]"]')
+                            .forEach(function (box) { box.checked = state; });
+                    }
+                </script>
+            <?php endif ?>
+
+            <div class="space-y-2">
+                <?php foreach ($duplicateSites as $dup): ?>
+                    <?php
+                    $keepIsStranded = $dup['keep_id'] === (int)$dup['stranded']['id'];
+                    $keepClient     = $keepIsStranded ? $dup['stranded']['client_name'] : $dup['linked']['client_name'];
+                    ?>
+                    <label class="flex items-start gap-2 border border-slate-200 rounded p-3">
+                        <input type="checkbox" name="merge[]" value="<?= (int)$dup['ploi_site_id'] ?>" class="mt-1"
+                               <?= $dup['both_assigned'] ? 'disabled' : 'checked' ?>>
+                        <span class="text-xs text-slate-600 space-y-1">
+                            <span class="block font-mono text-sm text-slate-700"><?= e($dup['domain']) ?></span>
+                            <?php if ($dup['both_assigned']): ?>
+                                <span class="block text-red-600">
+                                    Two records, each with a client (<?= e($dup['stranded']['client_name'] ?? '') ?> and <?= e($dup['linked']['client_name'] ?? '') ?>) — merge this one by hand.
+                                </span>
+                            <?php else: ?>
+                                <span class="block">
+                                    Keep #<?= (int)$dup['keep_id'] ?> (<?= e($keepClient ?: 'no client') ?>, on <?= e(($keepIsStranded ? $dup['stranded']['server_name'] : $dup['linked']['server_name']) ?: 'no server') ?>),
+                                    delete #<?= (int)$dup['drop_id'] ?>.
+                                </span>
+                                <span class="block text-slate-400">
+                                    Ploi site now on <?= e($dup['new_server_name'] ?? 'unknown server') ?>.
+                                </span>
+                            <?php endif ?>
+                        </span>
+                    </label>
+                <?php endforeach ?>
+            </div>
+
+            <label class="flex items-center gap-2 text-xs text-slate-600">
+                <input type="checkbox" name="remove_empty_servers" value="1" checked>
+                <span>Also delete Ploi-imported CRM server records that are gone from Ploi with nothing left linked to them</span>
+            </label>
+
+            <button class="px-3 py-1.5 border border-amber-300 bg-amber-50 text-amber-700 rounded text-sm hover:bg-amber-100">Merge Selected</button>
+        </form>
+    </div>
+    <?php endif ?>
+
     <!-- Excluded Servers -->
     <div class="bg-white border border-slate-200 rounded-lg p-6 space-y-3">
         <h2 class="text-sm font-semibold text-slate-700">Excluded Servers</h2>

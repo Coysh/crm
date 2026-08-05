@@ -232,21 +232,32 @@ class PloiSync
                         $linkedServerId = $srvRow->fetchColumn() ?: null;
 
                         if (!$existingCsId) {
-                            $this->db->prepare(
-                                "INSERT INTO client_sites
-                                    (client_id, server_id, website_stack, git_repo, notes, created_at)
-                                VALUES (NULL, ?, ?, ?, ?, datetime('now'))"
-                            )->execute([
-                                $linkedServerId,
-                                $projectType,
-                                $repo,
-                                'Imported from Ploi: ' . $domain,
-                            ]);
-                            $newCsId = (int)$this->db->lastInsertId();
+                            // A site rebuilt on another server comes back under a new
+                            // Ploi id. Adopt the CRM record already holding that domain
+                            // rather than stranding it and starting an empty duplicate.
+                            $existingCsId = $this->findUnlinkedClientSite($domain);
+
+                            if (!$existingCsId) {
+                                $this->db->prepare(
+                                    "INSERT INTO client_sites
+                                        (client_id, server_id, website_stack, git_repo, notes, created_at)
+                                    VALUES (NULL, ?, ?, ?, ?, datetime('now'))"
+                                )->execute([
+                                    $linkedServerId,
+                                    $projectType,
+                                    $repo,
+                                    'Imported from Ploi: ' . $domain,
+                                ]);
+                                $existingCsId = (int)$this->db->lastInsertId();
+                            }
+
                             $this->db->prepare(
                                 "UPDATE ploi_sites SET client_site_id = ? WHERE ploi_id = ?"
-                            )->execute([$newCsId, $siteId]);
-                            $existingCsId = $newCsId;
+                            )->execute([$existingCsId, $siteId]);
+                            if ($linkedServerId) {
+                                $this->db->prepare("UPDATE client_sites SET server_id = ? WHERE id = ?")
+                                    ->execute([$linkedServerId, (int)$existingCsId]);
+                            }
                         } elseif ($linkedServerId) {
                             // The site already exists locally. If it has moved to a
                             // different server in Ploi, follow that move — otherwise
@@ -429,6 +440,192 @@ class PloiSync
         } catch (Throwable) {}
 
         return $report;
+    }
+
+    /**
+     * The CRM record for a domain that no Ploi site points at — what a site
+     * rebuilt on a new server leaves behind. Prefers a record with a client on
+     * it, then the oldest.
+     */
+    private function findUnlinkedClientSite(string $domain): ?int
+    {
+        if ($domain === '' || str_contains($domain, '.ploi.site') || str_contains($domain, '.ploi-app.site')) {
+            return null;
+        }
+        try {
+            $stmt = $this->db->prepare("
+                SELECT cs.id
+                FROM client_sites cs
+                JOIN domains d ON d.id = cs.domain_id
+                WHERE LOWER(d.domain) = LOWER(?)
+                  AND NOT EXISTS (SELECT 1 FROM ploi_sites p WHERE p.client_site_id = cs.id)
+                ORDER BY cs.client_id IS NULL, cs.id
+                LIMIT 1
+            ");
+            $stmt->execute([$domain]);
+            $id = $stmt->fetchColumn();
+            return $id ? (int)$id : null;
+        } catch (Throwable) {
+            return null;
+        }
+    }
+
+    /**
+     * Duplicate CRM site records left behind when a server was decommissioned
+     * and its stale Ploi rows purged before the old records could be moved
+     * across: the curated record sits on the dead server with no Ploi link,
+     * while an empty one holds the live site. Pairs them up by domain.
+     */
+    public function duplicateSiteReport(): array
+    {
+        $pairs = [];
+        try {
+            $live = $this->db->query("
+                SELECT ps.id, ps.ploi_id, ps.domain, ps.client_site_id,
+                       srv.name      AS server_name,
+                       srv.server_id AS crm_server_id,
+                       lcs.client_id AS linked_client_id,
+                       lcs.domain_id AS linked_domain_id,
+                       lc.name       AS linked_client_name,
+                       ls.name       AS linked_server_name
+                FROM ploi_sites ps
+                LEFT JOIN ploi_servers srv ON srv.id  = ps.ploi_server_id
+                JOIN client_sites lcs      ON lcs.id  = ps.client_site_id
+                LEFT JOIN clients lc       ON lc.id   = lcs.client_id
+                LEFT JOIN servers ls       ON ls.id   = lcs.server_id
+                WHERE ps.is_stale = 0
+                ORDER BY LOWER(ps.domain)
+            ")->fetchAll();
+
+            $strandedStmt = $this->db->prepare("
+                SELECT cs.id, cs.client_id, cs.notes,
+                       c.name AS client_name,
+                       s.name AS server_name,
+                       d.domain
+                FROM client_sites cs
+                LEFT JOIN domains d ON d.id = cs.domain_id
+                LEFT JOIN clients c ON c.id = cs.client_id
+                LEFT JOIN servers s ON s.id = cs.server_id
+                WHERE cs.id != ?
+                  AND NOT EXISTS (SELECT 1 FROM ploi_sites p WHERE p.client_site_id = cs.id)
+                  AND (LOWER(COALESCE(d.domain, '')) = LOWER(?)
+                       OR (? IS NOT NULL AND cs.domain_id = ?))
+                ORDER BY cs.client_id IS NULL, cs.id
+            ");
+
+            foreach ($live as $site) {
+                $domain = (string)$site['domain'];
+                if (str_contains($domain, '.ploi.site') || str_contains($domain, '.ploi-app.site')) continue;
+
+                $strandedStmt->execute([
+                    (int)$site['client_site_id'],
+                    $domain,
+                    $site['linked_domain_id'],
+                    $site['linked_domain_id'],
+                ]);
+                foreach ($strandedStmt->fetchAll() as $stranded) {
+                    // Keep whichever record carries the client; the curated one
+                    // wins a tie, being the older of the two.
+                    $keepStranded = !empty($stranded['client_id']) || empty($site['linked_client_id']);
+                    $pairs[] = [
+                        'ploi_site_id'    => (int)$site['id'],
+                        'domain'          => $domain,
+                        'new_server_name' => $site['server_name'],
+                        'crm_server_id'   => $site['crm_server_id'] ? (int)$site['crm_server_id'] : null,
+                        'stranded'        => $stranded,
+                        'linked'          => [
+                            'id'          => (int)$site['client_site_id'],
+                            'client_id'   => $site['linked_client_id'],
+                            'client_name' => $site['linked_client_name'],
+                            'server_name' => $site['linked_server_name'],
+                        ],
+                        'keep_id'         => $keepStranded ? (int)$stranded['id'] : (int)$site['client_site_id'],
+                        'drop_id'         => $keepStranded ? (int)$site['client_site_id'] : (int)$stranded['id'],
+                        'both_assigned'   => !empty($stranded['client_id']) && !empty($site['linked_client_id']),
+                    ];
+                }
+            }
+        } catch (Throwable) {}
+
+        return $pairs;
+    }
+
+    /**
+     * Fold the stranded CRM site records into the ones holding the live Ploi
+     * sites (or the other way round, whichever carries the client), then tidy
+     * up the CRM server rows the old sites left behind.
+     *
+     * @param int[] $ploiSiteIds which pairs from duplicateSiteReport() to merge
+     */
+    public function mergeDuplicateSites(array $ploiSiteIds, bool $removeEmptyServers = false): array
+    {
+        $summary = ['merged' => 0, 'servers' => 0, 'notes' => []];
+        $wanted  = array_flip(array_map('intval', $ploiSiteIds));
+        if (!$wanted && !$removeEmptyServers) return $summary;
+
+        $pairs = array_filter($this->duplicateSiteReport(), fn($p) => isset($wanted[$p['ploi_site_id']]));
+
+        $this->db->beginTransaction();
+        try {
+            $done = [];
+            foreach ($pairs as $pair) {
+                // One live site can only absorb one record; ignore later pairs
+                // for the same site (and anything already merged away).
+                if (isset($done[$pair['ploi_site_id']]) || isset($done['cs' . $pair['drop_id']])) continue;
+                if ($pair['both_assigned']) {
+                    $summary['notes'][] = $pair['domain'] . ' has two records with a client on each — left alone, merge that one by hand.';
+                    continue;
+                }
+
+                $keep = $pair['keep_id'];
+                $drop = $pair['drop_id'];
+
+                $this->mergeClientSites($keep, $drop);
+                $this->db->prepare("UPDATE ploi_sites SET client_site_id = ? WHERE client_site_id = ?")
+                    ->execute([$keep, $drop]);
+                $this->repointCostLinks($keep, $drop);
+                $this->deleteClientSite($drop, $pair['domain'], 'Merged into the CRM site record kept for this domain');
+
+                if ($pair['crm_server_id']) {
+                    $this->db->prepare("UPDATE client_sites SET server_id = ? WHERE id = ?")
+                        ->execute([$pair['crm_server_id'], $keep]);
+                }
+
+                $done[$pair['ploi_site_id']] = true;
+                $done['cs' . $drop] = true;
+                $summary['merged']++;
+            }
+
+            if ($removeEmptyServers) {
+                // Only ever the rows the Ploi import created for itself, and only
+                // once their Ploi mirror is gone and nothing else points at them.
+                $candidates = $this->db->query("
+                    SELECT s.id, s.name
+                    FROM servers s
+                    WHERE s.notes LIKE 'Imported from Ploi%'
+                      AND NOT EXISTS (SELECT 1 FROM ploi_servers p WHERE p.server_id = s.id)
+                    ORDER BY s.name
+                ")->fetchAll();
+
+                foreach ($candidates as $srv) {
+                    $blockers = $this->crmServerBlockers((int)$srv['id']);
+                    if ($blockers) continue;
+                    $this->db->prepare(
+                        "INSERT INTO deletion_log (entity_type, entity_id, entity_name, related_data, deleted_at)
+                         VALUES ('server', ?, ?, ?, datetime('now'))"
+                    )->execute([(int)$srv['id'], (string)$srv['name'], json_encode(['reason' => 'No longer in Ploi and nothing linked to it'])]);
+                    $this->db->prepare("DELETE FROM servers WHERE id = ?")->execute([(int)$srv['id']]);
+                    $summary['servers']++;
+                }
+            }
+
+            $this->db->commit();
+        } catch (Throwable $e) {
+            $this->db->rollBack();
+            throw $e;
+        }
+
+        return $summary;
     }
 
     /**

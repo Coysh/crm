@@ -83,8 +83,11 @@ class SettingsController
         $breadcrumbs = [['Settings', '/settings'], ['Ploi', null]];
         $lastError = $this->lastPloiError();
 
-        $staleServers = $staleSites = $serverExclusions = [];
+        $staleServers = $staleSites = $serverExclusions = $duplicateSites = [];
         $staleReport = ['servers' => [], 'sites' => []];
+        try {
+            $duplicateSites = (new PloiSync($this->db, $this->ploi))->duplicateSiteReport();
+        } catch (\Throwable) {}
         try {
             $staleServers = $this->db->query("SELECT * FROM ploi_servers WHERE is_stale = 1 ORDER BY name")->fetchAll();
             $staleSites = $this->db->query("SELECT * FROM ploi_sites WHERE is_stale = 1 ORDER BY domain")->fetchAll();
@@ -92,7 +95,7 @@ class SettingsController
             $staleReport = (new PloiSync($this->db, $this->ploi))->staleReport();
         } catch (\Throwable) {}
 
-        render('settings.ploi', compact('ploiCfg', 'connected', 'breadcrumbs', 'lastError', 'staleServers', 'staleSites', 'staleReport', 'serverExclusions'), 'Ploi Settings');
+        render('settings.ploi', compact('ploiCfg', 'connected', 'breadcrumbs', 'lastError', 'staleServers', 'staleSites', 'staleReport', 'duplicateSites', 'serverExclusions'), 'Ploi Settings');
     }
 
     /**
@@ -193,6 +196,43 @@ class SettingsController
             }
         } catch (\Throwable $e) {
             flash('error', 'Reconcile failed: ' . $e->getMessage());
+        }
+        redirect('/settings/ploi');
+    }
+
+    /**
+     * Fold duplicate CRM site records back together after a server migration
+     * whose stale Ploi rows were purged before the records could follow.
+     */
+    public function mergeDuplicatePloiSites(): void
+    {
+        if (!csrfCheck()) {
+            flash('error', 'Your session expired. Please try again.');
+            redirect('/settings/ploi');
+        }
+
+        $ids = array_map('intval', (array)($_POST['merge'] ?? []));
+        $removeServers = !empty($_POST['remove_empty_servers']);
+
+        if (!$ids && !$removeServers) {
+            flash('error', 'Nothing selected to merge.');
+            redirect('/settings/ploi');
+        }
+
+        try {
+            $sync = new PloiSync($this->db, $this->ploi);
+            $r = $sync->mergeDuplicateSites($ids, $removeServers);
+
+            $parts = [];
+            if ($r['merged'])  $parts[] = "{$r['merged']} duplicate site record(s) merged";
+            if ($r['servers']) $parts[] = "{$r['servers']} unused CRM server record(s) deleted";
+            flash($parts ? 'success' : 'error', $parts ? ucfirst(implode(' and ', $parts)) . '.' : 'Nothing was merged.');
+
+            foreach ($r['notes'] as $note) {
+                flash('warning', $note);
+            }
+        } catch (\Throwable $e) {
+            flash('error', 'Merge failed: ' . $e->getMessage());
         }
         redirect('/settings/ploi');
     }
