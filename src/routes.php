@@ -465,6 +465,9 @@ $router->post('/settings/ploi/errors/dismiss', function () use ($db) {
 $router->post('/settings/ploi/stale/purge', function () use ($db) {
     (new CoyshCRM\Controllers\SettingsController($db))->purgeStalePloi();
 });
+$router->post('/settings/ploi/stale/reconcile', function () use ($db) {
+    (new CoyshCRM\Controllers\SettingsController($db))->reconcileStalePloi();
+});
 $router->post('/settings/ploi/servers/(\d+)/exclude', function ($ploiId) use ($db) {
     (new CoyshCRM\Controllers\SettingsController($db))->excludePloiServer((int)$ploiId);
 });

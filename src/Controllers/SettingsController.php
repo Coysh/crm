@@ -84,13 +84,15 @@ class SettingsController
         $lastError = $this->lastPloiError();
 
         $staleServers = $staleSites = $serverExclusions = [];
+        $staleReport = ['servers' => [], 'sites' => []];
         try {
             $staleServers = $this->db->query("SELECT * FROM ploi_servers WHERE is_stale = 1 ORDER BY name")->fetchAll();
             $staleSites = $this->db->query("SELECT * FROM ploi_sites WHERE is_stale = 1 ORDER BY domain")->fetchAll();
             $serverExclusions = $this->db->query("SELECT * FROM ploi_server_exclusions ORDER BY created_at DESC")->fetchAll();
+            $staleReport = (new PloiSync($this->db, $this->ploi))->staleReport();
         } catch (\Throwable) {}
 
-        render('settings.ploi', compact('ploiCfg', 'connected', 'breadcrumbs', 'lastError', 'staleServers', 'staleSites', 'serverExclusions'), 'Ploi Settings');
+        render('settings.ploi', compact('ploiCfg', 'connected', 'breadcrumbs', 'lastError', 'staleServers', 'staleSites', 'staleReport', 'serverExclusions'), 'Ploi Settings');
     }
 
     /**
@@ -148,6 +150,49 @@ class SettingsController
             flash('success', "Purged {$counts['servers']} stale server(s) and {$counts['sites']} stale site(s).");
         } catch (\Throwable $e) {
             flash('error', 'Failed to purge stale records: ' . $e->getMessage());
+        }
+        redirect('/settings/ploi');
+    }
+
+    /**
+     * Clear up after a server was deleted in Ploi: move each old site's CRM
+     * record onto the site that replaced it, or keep/delete it, then drop the
+     * stale Ploi rows.
+     */
+    public function reconcileStalePloi(): void
+    {
+        if (!csrfCheck()) {
+            flash('error', 'Your session expired. Please try again.');
+            redirect('/settings/ploi');
+        }
+
+        $decisions = [];
+        foreach ((array)($_POST['action'] ?? []) as $staleId => $action) {
+            $staleId = (int)$staleId;
+            if (!$staleId) continue;
+            $decisions[$staleId] = [
+                'action'    => in_array($action, ['transfer', 'keep', 'delete'], true) ? $action : 'keep',
+                'successor' => (int)($_POST['successor'][$staleId] ?? 0),
+            ];
+        }
+
+        try {
+            $sync = new PloiSync($this->db, $this->ploi);
+            $r = $sync->reconcileStale($decisions, !empty($_POST['remove_crm_servers']));
+
+            $parts = [];
+            if ($r['transferred'])   $parts[] = "{$r['transferred']} site(s) transferred to their new server";
+            if ($r['deleted_sites']) $parts[] = "{$r['deleted_sites']} CRM site record(s) deleted";
+            if ($r['kept'])          $parts[] = "{$r['kept']} CRM site record(s) left untouched";
+            $parts[] = "{$r['ploi_sites']} stale Ploi site(s) and {$r['ploi_servers']} stale server(s) removed";
+            if ($r['crm_servers'])   $parts[] = "{$r['crm_servers']} CRM server record(s) deleted";
+            flash('success', ucfirst(implode(', ', $parts)) . '.');
+
+            foreach ($r['notes'] as $note) {
+                flash('error', $note);
+            }
+        } catch (\Throwable $e) {
+            flash('error', 'Reconcile failed: ' . $e->getMessage());
         }
         redirect('/settings/ploi');
     }
@@ -226,6 +271,18 @@ class SettingsController
                 flash('warning', $msg);
             } else {
                 flash('success', $msg);
+            }
+
+            // Point at the reconcile panel when a server disappeared from Ploi
+            // and its sites turned up elsewhere.
+            $report  = $sync->staleReport();
+            $moved   = count(array_filter($report['sites'], fn($s) => !empty($s['candidates']) && !empty($s['client_site_id'])));
+            $servers = count($report['servers']);
+            if ($moved || $servers) {
+                $bits = [];
+                if ($servers) $bits[] = "$servers server(s)";
+                if ($moved)   $bits[] = "$moved site(s) that now live on another server";
+                flash('warning', 'Deleted in Ploi: ' . implode(' and ', $bits) . '. Review them below to transfer or remove their CRM records.');
             }
         } catch (\Throwable $e) {
             flash('error', 'Ploi sync failed: ' . $e->getMessage());

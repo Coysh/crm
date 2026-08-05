@@ -31,7 +31,7 @@
                             <td class="px-4 py-2.5 text-slate-500 text-xs">
                                 <?php if ($related): ?>
                                     <?php foreach ($related as $k => $v): ?>
-                                        <span class="mr-2"><?= e(ucfirst($k)) ?>: <?= (int)$v ?></span>
+                                        <span class="mr-2"><?= e(ucfirst(str_replace('_', ' ', (string)$k))) ?>: <?= e(is_scalar($v) ? (string)$v : json_encode($v)) ?></span>
                                     <?php endforeach ?>
                                 <?php else: ?>
                                     <span class="text-slate-300">—</span>

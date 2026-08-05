@@ -367,6 +367,292 @@ class PloiSync
         return ['servers' => (int)$servers, 'sites' => (int)$sites];
     }
 
+    /**
+     * Everything the reconcile UI needs after a server has been deleted in Ploi:
+     * each stale site paired with the live Ploi site(s) now serving the same
+     * domain, plus the stale servers and what still points at their CRM row.
+     */
+    public function staleReport(): array
+    {
+        $report = ['servers' => [], 'sites' => []];
+
+        try {
+            $report['servers'] = $this->db->query("
+                SELECT pss.id, pss.ploi_id, pss.name, pss.ip_address, pss.server_id,
+                       s.name AS crm_server_name
+                FROM ploi_servers pss
+                LEFT JOIN servers s ON s.id = pss.server_id
+                WHERE pss.is_stale = 1
+                ORDER BY pss.name
+            ")->fetchAll();
+
+            foreach ($report['servers'] as &$srv) {
+                $srv['blockers'] = $srv['server_id']
+                    ? $this->crmServerBlockers((int)$srv['server_id'], true)
+                    : [];
+            }
+            unset($srv);
+
+            $report['sites'] = $this->db->query("
+                SELECT ps.id, ps.ploi_id, ps.domain, ps.client_site_id,
+                       old.name  AS old_server_name,
+                       c.name    AS client_name,
+                       d.domain  AS crm_domain,
+                       cs.notes  AS crm_notes
+                FROM ploi_sites ps
+                LEFT JOIN ploi_servers old ON old.id = ps.ploi_server_id
+                LEFT JOIN client_sites cs  ON cs.id  = ps.client_site_id
+                LEFT JOIN clients c        ON c.id   = cs.client_id
+                LEFT JOIN domains d        ON d.id   = cs.domain_id
+                WHERE ps.is_stale = 1
+                ORDER BY LOWER(ps.domain)
+            ")->fetchAll();
+
+            // A site moved between servers keeps its domain but gets a brand new
+            // Ploi id, so the domain is what pairs the old record with the new one.
+            $cands = $this->db->prepare("
+                SELECT ps.id, ps.ploi_id, ps.domain, ps.client_site_id,
+                       srv.name AS server_name,
+                       c.name   AS client_name
+                FROM ploi_sites ps
+                LEFT JOIN ploi_servers srv ON srv.id = ps.ploi_server_id
+                LEFT JOIN client_sites cs  ON cs.id  = ps.client_site_id
+                LEFT JOIN clients c        ON c.id   = cs.client_id
+                WHERE ps.is_stale = 0 AND LOWER(ps.domain) = LOWER(?) AND ps.id != ?
+                ORDER BY ps.last_synced_at DESC
+            ");
+            foreach ($report['sites'] as &$site) {
+                $cands->execute([$site['domain'], (int)$site['id']]);
+                $site['candidates'] = $cands->fetchAll();
+            }
+            unset($site);
+        } catch (Throwable) {}
+
+        return $report;
+    }
+
+    /**
+     * Clear up after a server migration. Each stale Ploi site gets one of three
+     * decisions, keyed by ploi_sites.id:
+     *   transfer — move its CRM record onto the live site now serving that domain
+     *   keep     — leave the CRM record alone (default)
+     *   delete   — delete the CRM site record as well
+     * The stale Ploi mirror rows always go, along with the stale servers.
+     *
+     * @param array<int, array{action?: string, successor?: int}> $decisions
+     */
+    public function reconcileStale(array $decisions, bool $removeCrmServers = false): array
+    {
+        $summary = [
+            'transferred'   => 0,
+            'kept'          => 0,
+            'deleted_sites' => 0,
+            'ploi_sites'    => 0,
+            'ploi_servers'  => 0,
+            'crm_servers'   => 0,
+            'notes'         => [],
+        ];
+
+        $stale = $this->db->query("SELECT * FROM ploi_sites WHERE is_stale = 1")->fetchAll();
+
+        $this->db->beginTransaction();
+        try {
+            foreach ($stale as $row) {
+                $id       = (int)$row['id'];
+                $action   = $decisions[$id]['action'] ?? 'keep';
+                $csId     = $row['client_site_id'] ? (int)$row['client_site_id'] : null;
+                $domain   = (string)$row['domain'];
+
+                if ($action === 'transfer') {
+                    $successor = null;
+                    $successorId = (int)($decisions[$id]['successor'] ?? 0);
+                    if ($successorId) {
+                        $stmt = $this->db->prepare("SELECT * FROM ploi_sites WHERE id = ? AND is_stale = 0");
+                        $stmt->execute([$successorId]);
+                        $successor = $stmt->fetch() ?: null;
+                    }
+                    if (!$successor) {
+                        $summary['notes'][] = "No live site chosen for $domain — its CRM record was left as it is.";
+                        $summary['kept']++;
+                        continue;
+                    }
+                    $this->transferSiteRecord($row, $successor);
+                    $summary['transferred']++;
+                } elseif ($action === 'delete') {
+                    if ($csId) {
+                        $this->deleteClientSite($csId, $domain, 'Removed with the deleted Ploi server');
+                        $summary['deleted_sites']++;
+                    } else {
+                        $summary['kept']++;
+                    }
+                } else {
+                    $summary['kept']++;
+                }
+            }
+
+            $summary['ploi_sites'] = (int)$this->db->exec("DELETE FROM ploi_sites WHERE is_stale = 1");
+
+            $staleServers = $this->db->query("SELECT id, ploi_id, name, server_id FROM ploi_servers WHERE is_stale = 1")->fetchAll();
+            $summary['ploi_servers'] = (int)$this->db->exec("DELETE FROM ploi_servers WHERE is_stale = 1");
+
+            if ($removeCrmServers) {
+                foreach ($staleServers as $srv) {
+                    $crmId = $srv['server_id'] ? (int)$srv['server_id'] : null;
+                    if (!$crmId) continue;
+
+                    $blockers = $this->crmServerBlockers($crmId);
+                    if ($blockers) {
+                        $summary['notes'][] = 'Kept CRM server "' . $srv['name'] . '" — still linked to ' . implode(', ', $blockers) . '.';
+                        continue;
+                    }
+
+                    $nameStmt = $this->db->prepare("SELECT name FROM servers WHERE id = ?");
+                    $nameStmt->execute([$crmId]);
+                    $crmName = $nameStmt->fetchColumn();
+                    if ($crmName === false) continue;
+
+                    $this->db->prepare(
+                        "INSERT INTO deletion_log (entity_type, entity_id, entity_name, related_data, deleted_at)
+                         VALUES ('server', ?, ?, ?, datetime('now'))"
+                    )->execute([$crmId, (string)$crmName, json_encode(['reason' => 'Deleted in Ploi', 'ploi_id' => (int)$srv['ploi_id']])]);
+                    $this->db->prepare("DELETE FROM servers WHERE id = ?")->execute([$crmId]);
+                    $summary['crm_servers']++;
+                }
+            }
+
+            $this->db->commit();
+        } catch (Throwable $e) {
+            $this->db->rollBack();
+            throw $e;
+        }
+
+        return $summary;
+    }
+
+    /**
+     * Move the CRM record behind a stale Ploi site onto the live site that now
+     * serves the same domain. The curated record wins: the throwaway one the
+     * sync auto-created for the new site is merged into it and removed.
+     */
+    private function transferSiteRecord(array $stale, array $successor): void
+    {
+        $oldCs = $stale['client_site_id'] ? (int)$stale['client_site_id'] : null;
+        $newCs = $successor['client_site_id'] ? (int)$successor['client_site_id'] : null;
+        if (!$oldCs) return;
+
+        $stmt = $this->db->prepare("SELECT server_id FROM ploi_servers WHERE id = ?");
+        $stmt->execute([(int)$successor['ploi_server_id']]);
+        $crmServerId = $stmt->fetchColumn() ?: null;
+
+        if ($newCs && $newCs !== $oldCs) {
+            $this->mergeClientSites($oldCs, $newCs);
+            // Every Ploi mirror row on the throwaway record follows the merge…
+            $this->db->prepare("UPDATE ploi_sites SET client_site_id = ? WHERE client_site_id = ?")
+                ->execute([$oldCs, $newCs]);
+            $this->repointCostLinks($oldCs, $newCs);
+            // …so nothing references it by the time it goes.
+            $this->deleteClientSite($newCs, (string)$successor['domain'], 'Merged into the existing CRM site record');
+        } else {
+            $this->db->prepare("UPDATE ploi_sites SET client_site_id = ? WHERE id = ?")
+                ->execute([$oldCs, (int)$successor['id']]);
+        }
+
+        if ($crmServerId) {
+            $this->db->prepare("UPDATE client_sites SET server_id = ? WHERE id = ?")
+                ->execute([(int)$crmServerId, $oldCs]);
+        }
+    }
+
+    /**
+     * Copy anything the auto-created record knows that the kept one doesn't.
+     * Never overwrites a value already set by hand.
+     */
+    private function mergeClientSites(int $keepId, int $dropId): void
+    {
+        $stmt = $this->db->prepare("SELECT * FROM client_sites WHERE id = ?");
+        $stmt->execute([$keepId]);
+        $keep = $stmt->fetch();
+        $stmt->execute([$dropId]);
+        $drop = $stmt->fetch();
+        if (!$keep || !$drop) return;
+
+        $sets = [];
+        $params = [];
+        foreach (['client_id', 'domain_id', 'website_stack', 'css_framework', 'smtp_service', 'git_repo'] as $col) {
+            $keepVal = $keep[$col] ?? null;
+            $dropVal = $drop[$col] ?? null;
+            if (($keepVal === null || $keepVal === '') && $dropVal !== null && $dropVal !== '') {
+                $sets[] = "$col = ?";
+                $params[] = $dropVal;
+            }
+        }
+        if (empty($keep['has_deployment_pipeline']) && !empty($drop['has_deployment_pipeline'])) {
+            $sets[] = 'has_deployment_pipeline = 1';
+        }
+        if (!$sets) return;
+
+        $params[] = $keepId;
+        $this->db->prepare("UPDATE client_sites SET " . implode(', ', $sets) . " WHERE id = ?")->execute($params);
+    }
+
+    /**
+     * Move per-site recurring cost links off the record that is about to go,
+     * dropping any that would duplicate a link the kept record already has.
+     */
+    private function repointCostLinks(int $keepId, int $dropId): void
+    {
+        try {
+            $this->db->prepare(
+                "DELETE FROM recurring_cost_clients
+                 WHERE client_site_id = ?
+                   AND recurring_cost_id IN (SELECT recurring_cost_id FROM recurring_cost_clients WHERE client_site_id = ?)"
+            )->execute([$dropId, $keepId]);
+            $this->db->prepare("UPDATE recurring_cost_clients SET client_site_id = ? WHERE client_site_id = ?")
+                ->execute([$keepId, $dropId]);
+        } catch (Throwable) {}
+    }
+
+    private function deleteClientSite(int $id, string $domain, string $reason): void
+    {
+        $this->db->prepare(
+            "INSERT INTO deletion_log (entity_type, entity_id, entity_name, related_data, deleted_at)
+             VALUES ('client_site', ?, ?, ?, datetime('now'))"
+        )->execute([$id, $domain !== '' ? $domain : ('Site #' . $id), json_encode(['reason' => $reason])]);
+
+        $this->db->prepare("UPDATE ploi_sites SET client_site_id = NULL WHERE client_site_id = ?")->execute([$id]);
+        $this->db->prepare("DELETE FROM client_sites WHERE id = ?")->execute([$id]);
+    }
+
+    /**
+     * What still points at a CRM server row, in words. `$ignorePloiMirror`
+     * skips the Ploi mirror row itself — the preview needs that, since the
+     * stale mirror row is about to be deleted but hasn't been yet.
+     *
+     * @return string[]
+     */
+    private function crmServerBlockers(int $serverId, bool $ignorePloiMirror = false): array
+    {
+        $checks = [
+            'client_sites'    => ['SELECT COUNT(*) FROM client_sites WHERE server_id = ?', 'site', 'sites'],
+            'recurring_costs' => ['SELECT COUNT(*) FROM recurring_costs WHERE server_id = ?', 'recurring cost', 'recurring costs'],
+            'expenses'        => ['SELECT COUNT(*) FROM expenses WHERE server_id = ?', 'expense', 'expenses'],
+        ];
+        if (!$ignorePloiMirror) {
+            $checks['ploi_servers'] = ['SELECT COUNT(*) FROM ploi_servers WHERE server_id = ?', 'Ploi server', 'Ploi servers'];
+        }
+
+        $blockers = [];
+        foreach ($checks as [$sql, $one, $many]) {
+            try {
+                $stmt = $this->db->prepare($sql);
+                $stmt->execute([$serverId]);
+                $n = (int)$stmt->fetchColumn();
+                if ($n > 0) $blockers[] = $n . ' ' . ($n === 1 ? $one : $many);
+            } catch (Throwable) {}
+        }
+        return $blockers;
+    }
+
     private function excludedServerPloiIds(): array
     {
         try {
