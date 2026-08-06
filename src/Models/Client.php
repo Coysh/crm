@@ -12,8 +12,9 @@ class Client extends Model
     {
         $mrrSql = FreeAgentRecurringInvoice::monthlySql();
         $agrSql = $this->agreementMrrSql('c.id');
+        $siteActiveCs = $this->siteStatusFilter('cs');
         $sql = "SELECT c.*,
-            (SELECT COUNT(*) FROM client_sites cs WHERE cs.client_id = c.id) AS site_count,
+            (SELECT COUNT(*) FROM client_sites cs WHERE cs.client_id = c.id{$siteActiveCs}) AS site_count,
             (SELECT COALESCE(SUM($mrrSql), 0)
              FROM freeagent_recurring_invoices fri
              WHERE fri.client_id = c.id AND fri.recurring_status = 'Active')
@@ -42,9 +43,10 @@ class Client extends Model
             : ", 0 AS has_cloudflare";
 
         $agrSql = $this->agreementMrrSql('c.id');
+        $siteActiveCs = $this->siteStatusFilter('cs');
 
         $sql = "SELECT c.*,
-            (SELECT COUNT(*) FROM client_sites cs WHERE cs.client_id = c.id) AS site_count,
+            (SELECT COUNT(*) FROM client_sites cs WHERE cs.client_id = c.id{$siteActiveCs}) AS site_count,
             (SELECT COALESCE(SUM($mrrSql), 0)
              FROM freeagent_recurring_invoices fri
              WHERE fri.client_id = c.id AND fri.recurring_status = 'Active')
@@ -222,6 +224,20 @@ class Client extends Model
         return $checked;
     }
 
+    /** Check once whether client_sites.status column exists (migration 030). */
+    private function hasSiteStatusColumn(): bool
+    {
+        static $checked = null;
+        if ($checked !== null) return $checked;
+        try {
+            $this->query("SELECT status FROM client_sites LIMIT 0");
+            $checked = true;
+        } catch (\Throwable) {
+            $checked = false;
+        }
+        return $checked;
+    }
+
     /** Check once whether recurring_costs.currency column exists (migration 014). */
     /**
      * Whether the agreements table is present (tolerates partially-migrated DBs,
@@ -265,6 +281,12 @@ class Client extends Model
         return $checked;
     }
 
+    /** SQL fragment excluding archived sites, or '' pre-migration 030. */
+    private function siteStatusFilter(string $alias): string
+    {
+        return $this->hasSiteStatusColumn() ? " AND COALESCE($alias.status,'active')='active'" : '';
+    }
+
     /** Lazy ExchangeRateService instance. */
     private function fx(): \CoyshCRM\Services\ExchangeRateService
     {
@@ -284,14 +306,16 @@ class Client extends Model
 
         // 1. Server-linked (dynamic apportionment) — requires migration 011
         if ($this->hasServerIdColumn()) {
+            $siteActiveCs2 = $this->siteStatusFilter('cs2');
+            $siteActiveCs  = $this->siteStatusFilter('cs');
             $rows = $this->query("
                 SELECT
                     (CASE rc.billing_cycle WHEN 'monthly' THEN rc.amount ELSE rc.amount / 12.0 END)
-                    / MAX(1, (SELECT COUNT(DISTINCT cs2.client_id) FROM client_sites cs2 WHERE cs2.server_id = rc.server_id)) AS monthly_share
+                    / MAX(1, (SELECT COUNT(DISTINCT cs2.client_id) FROM client_sites cs2 WHERE cs2.server_id = rc.server_id{$siteActiveCs2})) AS monthly_share
                     {$currCol}
                 FROM recurring_costs rc
                 WHERE rc.is_active = 1 AND rc.server_id IS NOT NULL
-                  AND EXISTS (SELECT 1 FROM client_sites cs WHERE cs.server_id = rc.server_id AND cs.client_id = ?)
+                  AND EXISTS (SELECT 1 FROM client_sites cs WHERE cs.server_id = rc.server_id AND cs.client_id = ?{$siteActiveCs})
                 GROUP BY rc.id
             ", [$clientId])->fetchAll();
             foreach ($rows as $r) {
@@ -318,16 +342,19 @@ class Client extends Model
         }
 
         // 3. Per-site junction
+        $siteActiveCs  = $this->siteStatusFilter('cs');
+        $siteActiveCs3 = $this->siteStatusFilter('cs3');
         $rows = $this->query("
             SELECT
                 (CASE rc.billing_cycle WHEN 'monthly' THEN rc.amount ELSE rc.amount / 12.0 END)
                 / MAX(1, (SELECT COUNT(*) FROM recurring_cost_clients c2
-                          WHERE c2.recurring_cost_id = rc.id AND c2.client_site_id IS NOT NULL))
+                          JOIN client_sites cs3 ON cs3.id = c2.client_site_id
+                          WHERE c2.recurring_cost_id = rc.id AND c2.client_site_id IS NOT NULL{$siteActiveCs3}))
                 * COUNT(*) AS monthly_share
                 {$currCol}
             FROM recurring_costs rc
             JOIN recurring_cost_clients rcc ON rcc.recurring_cost_id = rc.id
-            JOIN client_sites cs ON cs.id = rcc.client_site_id AND cs.client_id = ?
+            JOIN client_sites cs ON cs.id = rcc.client_site_id AND cs.client_id = ?{$siteActiveCs}
             WHERE rc.is_active = 1 AND rcc.client_site_id IS NOT NULL $serverFilter
             GROUP BY rc.id
         ", [$clientId])->fetchAll();
@@ -353,18 +380,20 @@ class Client extends Model
 
         // 1. Server-linked costs — requires migration 011
         if ($this->hasServerIdColumn()) {
+            $siteActiveCs2 = $this->siteStatusFilter('cs2');
+            $siteActiveCs  = $this->siteStatusFilter('cs');
             $serverRows = $this->query("
                 SELECT rc.id, rc.name, rc.amount, rc.billing_cycle, rc.server_id,
                        (CASE rc.billing_cycle WHEN 'monthly' THEN rc.amount ELSE rc.amount / 12.0 END)
-                       / MAX(1, (SELECT COUNT(DISTINCT cs2.client_id) FROM client_sites cs2 WHERE cs2.server_id = rc.server_id)) AS monthly_share,
-                       (SELECT COUNT(DISTINCT cs2.client_id) FROM client_sites cs2 WHERE cs2.server_id = rc.server_id) AS shared_count,
+                       / MAX(1, (SELECT COUNT(DISTINCT cs2.client_id) FROM client_sites cs2 WHERE cs2.server_id = rc.server_id{$siteActiveCs2})) AS monthly_share,
+                       (SELECT COUNT(DISTINCT cs2.client_id) FROM client_sites cs2 WHERE cs2.server_id = rc.server_id{$siteActiveCs2}) AS shared_count,
                        'server' AS assignment_type,
                        NULL AS total_sites,
                        NULL AS client_site_count
                        {$currCol}
                 FROM recurring_costs rc
                 WHERE rc.is_active = 1 AND rc.server_id IS NOT NULL
-                  AND EXISTS (SELECT 1 FROM client_sites cs WHERE cs.server_id = rc.server_id AND cs.client_id = ?)
+                  AND EXISTS (SELECT 1 FROM client_sites cs WHERE cs.server_id = rc.server_id AND cs.client_id = ?{$siteActiveCs})
                 GROUP BY rc.id
             ", [$clientId])->fetchAll();
             if ($fx) {
@@ -399,21 +428,25 @@ class Client extends Model
         }
 
         // 3. Per-site junction
+        $siteActiveCs  = $this->siteStatusFilter('cs');
+        $siteActiveCs3 = $this->siteStatusFilter('cs3');
         $siteRows = $this->query("
             SELECT rc.id, rc.name, rc.amount, rc.billing_cycle, NULL AS server_id,
                    COUNT(*) AS client_site_count,
                    (SELECT COUNT(*) FROM recurring_cost_clients c2
-                    WHERE c2.recurring_cost_id = rc.id AND c2.client_site_id IS NOT NULL) AS total_sites,
+                    JOIN client_sites cs3 ON cs3.id = c2.client_site_id
+                    WHERE c2.recurring_cost_id = rc.id AND c2.client_site_id IS NOT NULL{$siteActiveCs3}) AS total_sites,
                    (CASE rc.billing_cycle WHEN 'monthly' THEN rc.amount ELSE rc.amount / 12.0 END)
                    / MAX(1, (SELECT COUNT(*) FROM recurring_cost_clients c2
-                             WHERE c2.recurring_cost_id = rc.id AND c2.client_site_id IS NOT NULL))
+                             JOIN client_sites cs3 ON cs3.id = c2.client_site_id
+                             WHERE c2.recurring_cost_id = rc.id AND c2.client_site_id IS NOT NULL{$siteActiveCs3}))
                    * COUNT(*) AS monthly_share,
                    'site' AS assignment_type,
                    NULL AS shared_count
                    {$currCol}
             FROM recurring_costs rc
             JOIN recurring_cost_clients rcc ON rcc.recurring_cost_id = rc.id
-            JOIN client_sites cs ON cs.id = rcc.client_site_id AND cs.client_id = ?
+            JOIN client_sites cs ON cs.id = rcc.client_site_id AND cs.client_id = ?{$siteActiveCs}
             WHERE rc.is_active = 1 AND rcc.client_site_id IS NOT NULL $serverFilter
             GROUP BY rc.id
         ", [$clientId])->fetchAll();
@@ -502,15 +535,20 @@ class Client extends Model
         $currCol      = $this->hasCurrencyColumn() ? ", COALESCE(rc.currency, 'GBP') AS currency" : ", 'GBP' AS currency";
         $serverFilter = $this->hasServerIdColumn() ? 'AND rc.server_id IS NULL' : '';
 
+        $siteActiveCs2 = $this->siteStatusFilter('cs2');
+        $siteActiveCs  = $this->siteStatusFilter('cs');
+        $siteActiveCs3 = $this->siteStatusFilter('cs3');
+        $siteActiveInner = $this->hasSiteStatusColumn() ? "AND COALESCE(status,'active')='active'" : '';
+
         $rcRows = [];
         if ($this->hasServerIdColumn()) {
             $rcRows = array_merge($rcRows, $this->query("
                 SELECT cs.client_id,
                        (CASE rc.billing_cycle WHEN 'monthly' THEN rc.amount ELSE rc.amount / 12.0 END)
-                       / MAX(1, (SELECT COUNT(DISTINCT cs2.client_id) FROM client_sites cs2 WHERE cs2.server_id = rc.server_id)) AS monthly_share
+                       / MAX(1, (SELECT COUNT(DISTINCT cs2.client_id) FROM client_sites cs2 WHERE cs2.server_id = rc.server_id{$siteActiveCs2})) AS monthly_share
                        {$currCol}
                 FROM recurring_costs rc
-                JOIN (SELECT DISTINCT server_id, client_id FROM client_sites WHERE client_id IS NOT NULL) cs
+                JOIN (SELECT DISTINCT server_id, client_id FROM client_sites WHERE client_id IS NOT NULL {$siteActiveInner}) cs
                   ON cs.server_id = rc.server_id
                 WHERE rc.is_active = 1 AND rc.server_id IS NOT NULL
             ")->fetchAll());
@@ -530,12 +568,13 @@ class Client extends Model
             SELECT cs.client_id,
                    (CASE rc.billing_cycle WHEN 'monthly' THEN rc.amount ELSE rc.amount / 12.0 END)
                    / MAX(1, (SELECT COUNT(*) FROM recurring_cost_clients c2
-                             WHERE c2.recurring_cost_id = rc.id AND c2.client_site_id IS NOT NULL))
+                             JOIN client_sites cs3 ON cs3.id = c2.client_site_id
+                             WHERE c2.recurring_cost_id = rc.id AND c2.client_site_id IS NOT NULL{$siteActiveCs3}))
                    * COUNT(*) AS monthly_share
                    {$currCol}
             FROM recurring_costs rc
             JOIN recurring_cost_clients rcc ON rcc.recurring_cost_id = rc.id AND rcc.client_site_id IS NOT NULL
-            JOIN client_sites cs ON cs.id = rcc.client_site_id AND cs.client_id IS NOT NULL
+            JOIN client_sites cs ON cs.id = rcc.client_site_id AND cs.client_id IS NOT NULL{$siteActiveCs}
             WHERE rc.is_active = 1 $serverFilter
             GROUP BY rc.id, cs.client_id
         ")->fetchAll());
@@ -608,7 +647,7 @@ class Client extends Model
 
         // Managed clients must have sites + domains; others only need domains (not necessarily full hosting)
         if ($clientType === 'managed') {
-            $hasSites   = (bool)$this->query("SELECT 1 FROM client_sites WHERE client_id = ? LIMIT 1", [$clientId])->fetchColumn();
+            $hasSites   = (bool)$this->query("SELECT 1 FROM client_sites WHERE client_id = ?" . $this->siteStatusFilter('client_sites') . " LIMIT 1", [$clientId])->fetchColumn();
             $hasDomains = (bool)$this->query("SELECT 1 FROM domains WHERE client_id = ? LIMIT 1", [$clientId])->fetchColumn();
             if (!$hasSites || !$hasDomains) $flags[] = 'incomplete_setup';
         }
@@ -692,9 +731,10 @@ class Client extends Model
         } catch (\Throwable) {}
         $overdueSet = array_flip($overdueIds);
 
-        // Aggregate: has sites
+        // Aggregate: has sites (active only — an all-archived client should
+        // still trip incomplete_setup)
         $siteIds = $this->query(
-            "SELECT DISTINCT client_id FROM client_sites WHERE client_id IS NOT NULL"
+            "SELECT DISTINCT client_id FROM client_sites WHERE client_id IS NOT NULL" . $this->siteStatusFilter('client_sites')
         )->fetchAll(\PDO::FETCH_COLUMN);
         $siteSet = array_flip($siteIds);
 

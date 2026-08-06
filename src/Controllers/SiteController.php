@@ -9,23 +9,27 @@ use CoyshCRM\Models\ClientSite;
 use CoyshCRM\Models\Domain;
 use CoyshCRM\Models\Server;
 use CoyshCRM\Services\PloiService;
+use CoyshCRM\Services\WpmgrService;
 use PDO;
 
 class SiteController
 {
     private ClientSite $model;
     private PloiService $ploi;
+    private WpmgrService $wpmgr;
 
     public function __construct(private PDO $db)
     {
         $this->model = new ClientSite($db);
         $this->ploi  = new PloiService($db);
+        $this->wpmgr = new WpmgrService($db);
     }
 
     public function index(): void
     {
         $group  = in_array($_GET['group'] ?? '', ['server', 'client']) ? $_GET['group'] : 'all';
-        $ploiConnected = $this->ploi->isConnected();
+        $ploiConnected  = $this->ploi->isConnected();
+        $wpmgrConnected = $this->wpmgr->isConnected();
 
         $sites = $this->db->query("
             SELECT cs.*,
@@ -36,12 +40,17 @@ class SiteController
                 s.name           AS server_name,
                 ps.domain        AS ploi_domain,
                 ps.status        AS ploi_status,
-                ps.id            AS ploi_site_id
+                ps.id            AS ploi_site_id,
+                ws.id                AS wpmgr_site_id,
+                ws.wp_version        AS wpmgr_wp_version,
+                ws.updates_available AS wpmgr_updates_available,
+                ws.health_status     AS wpmgr_health_status
             FROM client_sites cs
             LEFT JOIN domains d   ON d.id  = cs.domain_id
             LEFT JOIN clients c   ON c.id  = cs.client_id
             LEFT JOIN servers s   ON s.id  = cs.server_id
             LEFT JOIN ploi_sites ps ON ps.client_site_id = cs.id
+            LEFT JOIN wpmgr_sites ws ON ws.client_site_id = cs.id
             ORDER BY LOWER(COALESCE(d.domain, '')), cs.id
         ")->fetchAll();
 
@@ -73,7 +82,7 @@ class SiteController
         )->fetchAll(PDO::FETCH_COLUMN);
         $allClients = $this->db->query("SELECT id, name FROM clients WHERE status = 'active' ORDER BY name")->fetchAll();
 
-        render('sites.index', compact('sites', 'grouped', 'group', 'servers', 'stacks', 'allClients', 'ploiConnected'), 'Sites');
+        render('sites.index', compact('sites', 'grouped', 'group', 'servers', 'stacks', 'allClients', 'ploiConnected', 'wpmgrConnected'), 'Sites');
     }
 
     public function show(int $id): void
@@ -256,6 +265,42 @@ class SiteController
 
         flash('success', "$count site" . ($count !== 1 ? 's' : '') . " moved to " . $serverName . '.');
         redirect($back);
+    }
+
+    public function archive(int $id): void
+    {
+        $site = $this->model->findById($id);
+        if (!$site) { flash('error', 'Site not found.'); redirect('/sites'); return; }
+
+        $newStatus = ($site['status'] ?? 'active') === 'active' ? 'archived' : 'active';
+        $this->model->update($id, ['status' => $newStatus]);
+        $label = $newStatus === 'archived' ? 'archived' : 'restored';
+        flash('success', $this->siteName($site) . " {$label}.");
+        redirect('/sites');
+    }
+
+    public function bulkArchive(): void
+    {
+        if (!csrfCheck()) {
+            flash('error', 'Your session expired. Please try again.');
+            redirect('/sites');
+        }
+
+        $ids = array_values(array_unique(array_filter(
+            array_map('intval', (array)($_POST['site_ids'] ?? []))
+        )));
+        if (!$ids) {
+            flash('error', 'No sites selected.');
+            redirect('/sites');
+        }
+
+        $in    = implode(',', array_fill(0, count($ids), '?'));
+        $stmt  = $this->db->prepare("UPDATE client_sites SET status = 'archived' WHERE id IN ($in)");
+        $stmt->execute($ids);
+        $count = $stmt->rowCount();
+
+        flash('success', "$count site" . ($count !== 1 ? 's' : '') . " archived.");
+        redirect('/sites');
     }
 
     public function updateClient(int $id): void
@@ -462,12 +507,24 @@ class SiteController
                 ps.has_ssl       AS ploi_has_ssl,
                 ps.test_domain   AS ploi_test_domain,
                 ps.web_directory AS ploi_web_directory,
-                ps.is_stale      AS ploi_is_stale
+                ps.is_stale      AS ploi_is_stale,
+                ws.id                   AS wpmgr_site_id,
+                ws.wp_version           AS wpmgr_wp_version,
+                ws.php_version          AS wpmgr_php_version,
+                ws.updates_available    AS wpmgr_updates_available,
+                ws.health_status        AS wpmgr_health_status,
+                ws.connection_state     AS wpmgr_connection_state,
+                ws.last_backup_at       AS wpmgr_last_backup_at,
+                ws.last_backup_status   AS wpmgr_last_backup_status,
+                ws.up                   AS wpmgr_up,
+                ws.uptime_pct           AS wpmgr_uptime_pct,
+                ws.tls_expires_at       AS wpmgr_tls_expires_at
             FROM client_sites cs
             LEFT JOIN domains d     ON d.id  = cs.domain_id
             LEFT JOIN clients c     ON c.id  = cs.client_id
             LEFT JOIN servers s     ON s.id  = cs.server_id
             LEFT JOIN ploi_sites ps ON ps.client_site_id = cs.id
+            LEFT JOIN wpmgr_sites ws ON ws.client_site_id = cs.id
             WHERE cs.id = ?
             LIMIT 1
         ");

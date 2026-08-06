@@ -8,17 +8,21 @@ use CoyshCRM\Services\ExchangeRateService;
 use CoyshCRM\Services\FreeAgentClient;
 use CoyshCRM\Services\PloiService;
 use CoyshCRM\Services\PloiSync;
+use CoyshCRM\Services\WpmgrService;
+use CoyshCRM\Services\WpmgrSync;
 use PDO;
 
 class SettingsController
 {
     private FreeAgentClient $fa;
     private PloiService $ploi;
+    private WpmgrService $wpmgr;
 
     public function __construct(private PDO $db)
     {
         $this->fa = new FreeAgentClient($db);
         $this->ploi = new PloiService($db);
+        $this->wpmgr = new WpmgrService($db);
     }
 
     public function index(): void
@@ -45,12 +49,20 @@ class SettingsController
             'last_error'       => $this->lastPloiError(),
         ];
 
+        $wpmgrCfg       = $this->wpmgr->getConfig();
+        $wpmgrConnected = $this->wpmgr->isConnected();
+        $wpmgrStats = [
+            'sites_total'  => (int)$this->db->query("SELECT COUNT(*) FROM wpmgr_sites")->fetchColumn(),
+            'sites_linked' => (int)$this->db->query("SELECT COUNT(*) FROM wpmgr_sites WHERE client_site_id IS NOT NULL")->fetchColumn(),
+            'last_error'   => $this->lastWpmgrError(),
+        ];
+
         $fxSvc         = new ExchangeRateService($this->db);
         $exchangeRates = $fxSvc->getCurrentRates();
 
         $dataQualityIssues = DataQualityController::issueCount($this->db);
 
-        render('settings.index', compact('faCfg', 'connected', 'ploiCfg', 'ploiConnected', 'ploiStats', 'exchangeRates', 'dataQualityIssues'), 'Settings');
+        render('settings.index', compact('faCfg', 'connected', 'ploiCfg', 'ploiConnected', 'ploiStats', 'wpmgrCfg', 'wpmgrConnected', 'wpmgrStats', 'exchangeRates', 'dataQualityIssues'), 'Settings');
     }
 
     public function refreshExchangeRates(): void
@@ -116,6 +128,124 @@ class SettingsController
         } catch (\Throwable) {
             return null;
         }
+    }
+
+    public function wpmgr(): void
+    {
+        $wpmgrCfg  = $this->wpmgr->getConfig();
+        $connected = $this->wpmgr->isConnected();
+        $breadcrumbs = [['Settings', '/settings'], ['WPMGR', null]];
+        $lastError = $this->lastWpmgrError();
+
+        $sites = [];
+        try {
+            $sites = $this->db->query("
+                SELECT ws.*, d.domain AS client_site_domain
+                FROM wpmgr_sites ws
+                LEFT JOIN client_sites cs ON cs.id = ws.client_site_id
+                LEFT JOIN domains d ON d.id = cs.domain_id
+                ORDER BY ws.url
+            ")->fetchAll();
+        } catch (\Throwable) {}
+
+        render('settings.wpmgr', compact('wpmgrCfg', 'connected', 'breadcrumbs', 'lastError', 'sites'), 'WPMGR Settings');
+    }
+
+    /**
+     * Latest undismissed sync failure since the last successful full sync.
+     * Older failures are considered resolved once a full sync completes.
+     */
+    private function lastWpmgrError(): ?array
+    {
+        try {
+            return $this->db->query(
+                "SELECT * FROM wpmgr_sync_log
+                 WHERE status = 'failed' AND COALESCE(dismissed, 0) = 0
+                   AND started_at >= COALESCE(
+                       (SELECT MAX(started_at) FROM wpmgr_sync_log
+                        WHERE sync_type = 'full' AND status = 'completed'), '1970-01-01')
+                 ORDER BY started_at DESC LIMIT 1"
+            )->fetch() ?: null;
+        } catch (\Throwable) {
+            return null;
+        }
+    }
+
+    public function saveWpmgr(): void
+    {
+        $baseUrl = trim($_POST['base_url'] ?? '');
+        $apiKey  = trim($_POST['api_key'] ?? '');
+
+        if (!$baseUrl) {
+            flash('error', 'WPMGR base URL is required.');
+            redirect('/settings/wpmgr');
+        }
+        if (!$apiKey) {
+            if ($this->wpmgr->isConnected()) {
+                $cfg = $this->wpmgr->getConfig();
+                $this->wpmgr->saveConfig($baseUrl, $cfg['api_key']);
+                flash('success', 'WPMGR settings saved (existing API key unchanged).');
+            } else {
+                flash('error', 'WPMGR API key is required.');
+            }
+            redirect('/settings/wpmgr');
+        }
+
+        $this->wpmgr->saveConfig($baseUrl, $apiKey);
+        flash('success', 'WPMGR settings saved.');
+        redirect('/settings/wpmgr');
+    }
+
+    public function testWpmgr(): void
+    {
+        try {
+            $this->wpmgr->validateConnection();
+            flash('success', 'WPMGR connection successful.');
+        } catch (\Throwable $e) {
+            flash('error', $e->getMessage());
+        }
+        redirect('/settings/wpmgr');
+    }
+
+    public function syncWpmgr(): void
+    {
+        if (!$this->wpmgr->isConnected()) {
+            flash('error', 'WPMGR is not connected.');
+            redirect('/settings/wpmgr');
+        }
+
+        try {
+            $sync = new WpmgrSync($this->db, $this->wpmgr);
+            $results = $sync->fullSync();
+            $msg = "WPMGR sync complete. Sites: {$results['sites']}";
+            if (!empty($results['errors'])) {
+                $msg .= ' (partial — ' . implode('; ', $results['errors']) . ')';
+                flash('warning', $msg);
+            } else {
+                flash('success', $msg);
+            }
+        } catch (\Throwable $e) {
+            flash('error', 'WPMGR sync failed: ' . $e->getMessage());
+        }
+        redirect('/settings/wpmgr');
+    }
+
+    public function disconnectWpmgr(): void
+    {
+        $this->wpmgr->disconnect();
+        flash('success', 'WPMGR disconnected.');
+        redirect('/settings/wpmgr');
+    }
+
+    public function dismissWpmgrError(): void
+    {
+        try {
+            $this->db->exec("UPDATE wpmgr_sync_log SET dismissed = 1 WHERE status = 'failed' AND dismissed = 0");
+            flash('success', 'Sync error dismissed.');
+        } catch (\Throwable $e) {
+            flash('error', 'Failed to dismiss error: ' . $e->getMessage());
+        }
+        redirect('/settings/wpmgr');
     }
 
     public function savePloi(): void

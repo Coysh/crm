@@ -81,14 +81,28 @@ class RecurringCost extends Model
      * Server-linked costs: derive clients dynamically from client_sites.
      * Others: use junction table.
      */
+    private function hasSiteStatusColumn(): bool
+    {
+        static $checked = null;
+        if ($checked !== null) return $checked;
+        try {
+            $this->query("SELECT status FROM client_sites LIMIT 0");
+            $checked = true;
+        } catch (\Throwable) {
+            $checked = false;
+        }
+        return $checked;
+    }
+
     public function getAssignmentSummary(int $id, ?int $serverId = null): array
     {
         if ($serverId) {
+            $siteActive = $this->hasSiteStatusColumn() ? " AND COALESCE(cs.status,'active')='active'" : '';
             $clients = $this->query("
                 SELECT DISTINCT c.id, c.name
                 FROM client_sites cs
                 JOIN clients c ON c.id = cs.client_id
-                WHERE cs.server_id = ?
+                WHERE cs.server_id = ?{$siteActive}
                 ORDER BY c.name
             ", [$serverId])->fetchAll();
             return ['clients' => $clients, 'sites' => [], 'via_server' => true];

@@ -25,7 +25,7 @@ class DataQualityController
              FROM client_sites cs
              LEFT JOIN domains d ON d.id = cs.domain_id
              LEFT JOIN ploi_sites ps ON ps.client_site_id = cs.id
-             WHERE cs.client_id IS NULL ORDER BY label"
+             WHERE cs.client_id IS NULL AND COALESCE(cs.status, 'active') = 'active' ORDER BY label"
         );
 
         $checks[] = $this->check(
@@ -34,7 +34,7 @@ class DataQualityController
             "SELECT cs.id, COALESCE(d.domain, 'Site #' || cs.id) AS label, '/sites/' || cs.id AS url
              FROM client_sites cs
              LEFT JOIN domains d ON d.id = cs.domain_id
-             WHERE cs.server_id IS NULL ORDER BY label"
+             WHERE cs.server_id IS NULL AND COALESCE(cs.status, 'active') = 'active' ORDER BY label"
         );
 
         $checks[] = $this->check(
@@ -140,8 +140,8 @@ class DataQualityController
     {
         $count = 0;
         $queries = [
-            "SELECT COUNT(*) FROM client_sites WHERE client_id IS NULL",
-            "SELECT COUNT(*) FROM client_sites WHERE server_id IS NULL",
+            "SELECT COUNT(*) FROM client_sites WHERE client_id IS NULL AND COALESCE(status, 'active') = 'active'",
+            "SELECT COUNT(*) FROM client_sites WHERE server_id IS NULL AND COALESCE(status, 'active') = 'active'",
             "SELECT COUNT(*) FROM domains WHERE client_id IS NULL AND COALESCE(status,'active') = 'active'",
             "SELECT COUNT(*) FROM domains WHERE COALESCE(status,'active') = 'active' AND (renewal_date IS NULL OR annual_cost IS NULL)",
             "SELECT COUNT(*) FROM freeagent_recurring_invoices WHERE client_id IS NULL AND recurring_status = 'Active'",

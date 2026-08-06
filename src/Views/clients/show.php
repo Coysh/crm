@@ -340,77 +340,106 @@ if (isset($db)) {
     </section>
 
     <!-- Sites -->
+    <?php
+    $activeSites   = array_filter($client['sites'], fn($s) => ($s['status'] ?? 'active') !== 'archived');
+    $archivedSites = array_filter($client['sites'], fn($s) => ($s['status'] ?? 'active') === 'archived');
+    function clientSiteRow(array $s, int $clientId): void { ?>
+        <tr class="hover:bg-slate-50 <?= ($s['status'] ?? 'active') === 'archived' ? 'opacity-60' : '' ?>">
+            <td class="px-4 py-2 font-mono text-xs">
+                <?php if ($s['git_repo']): ?>
+                    <a href="<?= e($s['git_repo']) ?>" target="_blank" rel="noopener" class="text-accent-600 hover:underline"><?= e($s['domain_name'] ?: '—') ?></a>
+                <?php else: ?>
+                    <?= e($s['domain_name'] ?: '—') ?>
+                <?php endif ?>
+            </td>
+            <td class="px-4 py-2"><?= e($s['website_stack'] ?: '—') ?></td>
+            <td class="px-4 py-2 text-slate-500"><?= e($s['css_framework'] ?: '—') ?></td>
+            <td class="px-4 py-2 text-slate-500"><?= e($s['smtp_service'] ?: '—') ?></td>
+            <td class="px-4 py-2 text-slate-500">
+                <?php if ($s['server_name']): ?>
+                    <?= e($s['server_name']) ?>
+                <?php else: ?>
+                    <span class="text-slate-400 italic text-xs">External</span>
+                <?php endif ?>
+            </td>
+            <td class="px-4 py-2 text-center"><?= $s['has_deployment_pipeline'] ? '<span class="text-green-500">✓</span>' : '<span class="text-slate-300">—</span>' ?></td>
+            <td class="px-4 py-2 text-xs">
+                <?php if (!empty($s['ploi_domain'])): ?>
+                    <details>
+                        <summary class="cursor-pointer text-accent-600">Ploi Site Details</summary>
+                        <div class="mt-1 text-slate-600 space-y-0.5">
+                            <div>Domain: <?= e($s['ploi_domain']) ?></div>
+                            <div>Type: <?= e($s['ploi_project_type'] ?: '—') ?> · PHP <?= e($s['ploi_php_version'] ?: '—') ?></div>
+                            <div>Repo: <?= e($s['ploi_repository'] ?: '—') ?> <?= $s['ploi_branch'] ? ('@ ' . e($s['ploi_branch'])) : '' ?></div>
+                            <div>SSL: <?= !empty($s['ploi_has_ssl']) ? 'Yes' : 'No' ?> · Web dir: <?= e($s['ploi_web_directory'] ?: '—') ?></div>
+                            <?php if (!empty($s['ploi_test_domain'])): ?><div>Test: <?= e($s['ploi_test_domain']) ?></div><?php endif ?>
+                            <div>Status: <?= e($s['ploi_status'] ?: '—') ?><?= !empty($s['ploi_is_stale']) ? ' (stale)' : '' ?></div>
+                        </div>
+                    </details>
+                <?php else: ?>—<?php endif ?>
+            </td>
+            <td class="px-4 py-2 text-right whitespace-nowrap">
+                <a href="/clients/<?= $clientId ?>/sites/<?= $s['id'] ?>/edit" class="text-xs text-slate-400 hover:text-slate-700 mr-2">Edit</a>
+                <form method="POST" action="/sites/<?= $s['id'] ?>/archive" class="inline">
+                    <button type="submit"
+                            onclick="return confirm('<?= ($s['status'] ?? 'active') === 'archived' ? 'Restore this site?' : 'Archive this site?' ?>')"
+                            class="text-xs text-slate-400 hover:text-slate-700 mr-2"><?= ($s['status'] ?? 'active') === 'archived' ? 'Restore' : 'Archive' ?></button>
+                </form>
+                <form method="POST" action="/clients/<?= $clientId ?>/sites/<?= $s['id'] ?>/delete" class="inline">
+                    <button type="submit" onclick="return confirm('Remove this site?')" class="text-xs text-red-400 hover:text-red-600">Remove</button>
+                </form>
+            </td>
+        </tr>
+    <?php }
+    function clientSiteTableHead(): void { ?>
+        <thead class="bg-slate-50 text-xs text-slate-500 uppercase tracking-wide">
+            <tr>
+                <th class="px-4 py-2 text-left">Domain</th>
+                <th class="px-4 py-2 text-left">Stack</th>
+                <th class="px-4 py-2 text-left">CSS</th>
+                <th class="px-4 py-2 text-left">SMTP</th>
+                <th class="px-4 py-2 text-left">Server</th>
+                <th class="px-4 py-2 text-center">CI/CD</th>
+                <th class="px-4 py-2 text-left">Ploi</th>
+                <th class="px-4 py-2"></th>
+            </tr>
+        </thead>
+    <?php }
+    ?>
     <section>
         <div class="flex items-center justify-between mb-2">
             <h2 class="text-sm font-semibold text-slate-700">Sites</h2>
             <a href="/clients/<?= $client['id'] ?>/sites/create" class="text-xs text-accent-600 hover:underline">+ Add Site</a>
         </div>
-        <?php if ($client['sites']): ?>
+        <?php if ($activeSites): ?>
         <div class="bg-white border border-slate-200 rounded-lg overflow-hidden">
             <div class="overflow-x-auto">
             <table class="w-full text-sm">
-                <thead class="bg-slate-50 text-xs text-slate-500 uppercase tracking-wide">
-                    <tr>
-                        <th class="px-4 py-2 text-left">Domain</th>
-                        <th class="px-4 py-2 text-left">Stack</th>
-                        <th class="px-4 py-2 text-left">CSS</th>
-                        <th class="px-4 py-2 text-left">SMTP</th>
-                        <th class="px-4 py-2 text-left">Server</th>
-                        <th class="px-4 py-2 text-center">CI/CD</th>
-                        <th class="px-4 py-2 text-left">Ploi</th>
-                        <th class="px-4 py-2"></th>
-                    </tr>
-                </thead>
+                <?php clientSiteTableHead() ?>
                 <tbody class="divide-y divide-slate-100">
-                    <?php foreach ($client['sites'] as $s): ?>
-                        <tr class="hover:bg-slate-50">
-                            <td class="px-4 py-2 font-mono text-xs">
-                                <?php if ($s['git_repo']): ?>
-                                    <a href="<?= e($s['git_repo']) ?>" target="_blank" rel="noopener" class="text-accent-600 hover:underline"><?= e($s['domain_name'] ?: '—') ?></a>
-                                <?php else: ?>
-                                    <?= e($s['domain_name'] ?: '—') ?>
-                                <?php endif ?>
-                            </td>
-                            <td class="px-4 py-2"><?= e($s['website_stack'] ?: '—') ?></td>
-                            <td class="px-4 py-2 text-slate-500"><?= e($s['css_framework'] ?: '—') ?></td>
-                            <td class="px-4 py-2 text-slate-500"><?= e($s['smtp_service'] ?: '—') ?></td>
-                            <td class="px-4 py-2 text-slate-500">
-                                <?php if ($s['server_name']): ?>
-                                    <?= e($s['server_name']) ?>
-                                <?php else: ?>
-                                    <span class="text-slate-400 italic text-xs">External</span>
-                                <?php endif ?>
-                            </td>
-                            <td class="px-4 py-2 text-center"><?= $s['has_deployment_pipeline'] ? '<span class="text-green-500">✓</span>' : '<span class="text-slate-300">—</span>' ?></td>
-                            <td class="px-4 py-2 text-xs">
-                                <?php if (!empty($s['ploi_domain'])): ?>
-                                    <details>
-                                        <summary class="cursor-pointer text-accent-600">Ploi Site Details</summary>
-                                        <div class="mt-1 text-slate-600 space-y-0.5">
-                                            <div>Domain: <?= e($s['ploi_domain']) ?></div>
-                                            <div>Type: <?= e($s['ploi_project_type'] ?: '—') ?> · PHP <?= e($s['ploi_php_version'] ?: '—') ?></div>
-                                            <div>Repo: <?= e($s['ploi_repository'] ?: '—') ?> <?= $s['ploi_branch'] ? ('@ ' . e($s['ploi_branch'])) : '' ?></div>
-                                            <div>SSL: <?= !empty($s['ploi_has_ssl']) ? 'Yes' : 'No' ?> · Web dir: <?= e($s['ploi_web_directory'] ?: '—') ?></div>
-                                            <?php if (!empty($s['ploi_test_domain'])): ?><div>Test: <?= e($s['ploi_test_domain']) ?></div><?php endif ?>
-                                            <div>Status: <?= e($s['ploi_status'] ?: '—') ?><?= !empty($s['ploi_is_stale']) ? ' (stale)' : '' ?></div>
-                                        </div>
-                                    </details>
-                                <?php else: ?>—<?php endif ?>
-                            </td>
-                            <td class="px-4 py-2 text-right">
-                                <a href="/clients/<?= $client['id'] ?>/sites/<?= $s['id'] ?>/edit" class="text-xs text-slate-400 hover:text-slate-700 mr-2">Edit</a>
-                                <form method="POST" action="/clients/<?= $client['id'] ?>/sites/<?= $s['id'] ?>/delete" class="inline">
-                                    <button type="submit" onclick="return confirm('Remove this site?')" class="text-xs text-red-400 hover:text-red-600">Remove</button>
-                                </form>
-                            </td>
-                        </tr>
-                    <?php endforeach ?>
+                    <?php foreach ($activeSites as $s): clientSiteRow($s, (int)$client['id']); endforeach ?>
                 </tbody>
             </table>
             </div>
         </div>
         <?php else: ?>
             <p class="text-sm text-slate-400">No sites yet. <a href="/clients/<?= $client['id'] ?>/sites/create" class="text-accent-600 hover:underline">Add one</a>.</p>
+        <?php endif ?>
+
+        <?php if ($archivedSites): ?>
+        <details class="mt-2">
+            <summary class="text-xs text-slate-500 hover:text-slate-700 cursor-pointer">Archived sites (<?= count($archivedSites) ?>)</summary>
+            <div class="bg-white border border-slate-200 rounded-lg overflow-hidden mt-2">
+                <div class="overflow-x-auto">
+                <table class="w-full text-sm">
+                    <?php clientSiteTableHead() ?>
+                    <tbody class="divide-y divide-slate-100">
+                        <?php foreach ($archivedSites as $s): clientSiteRow($s, (int)$client['id']); endforeach ?>
+                    </tbody>
+                </table>
+                </div>
+            </div>
+        </details>
         <?php endif ?>
     </section>
 

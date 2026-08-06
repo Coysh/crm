@@ -5,13 +5,17 @@ $qServer   = $_GET['server']     ?? '';
 $qStack    = $_GET['stack']      ?? '';
 $qUnassigned = !empty($_GET['unassigned']);
 
-function siteRow(array $s, array $allClients, bool $ploiConnected): void { ?>
+function siteRow(array $s, array $allClients, bool $ploiConnected, bool $wpmgrConnected): void {
+    $status = $s['status'] ?? 'active';
+    ?>
     <tr class="hover:bg-slate-50 site-row
-        <?= !$s['client_id'] ? 'bg-amber-50 hover:bg-amber-100' : '' ?>"
+        <?= !$s['client_id'] ? 'bg-amber-50 hover:bg-amber-100' : '' ?>
+        <?= $status === 'archived' ? 'opacity-60' : '' ?>"
         data-domain="<?= strtolower(e($s['domain_name'] ?? '')) ?>"
         data-server="<?= $s['server_id'] ?>"
         data-stack="<?= strtolower(e($s['website_stack'] ?? '')) ?>"
-        data-unassigned="<?= $s['client_id'] ? '0' : '1' ?>">
+        data-unassigned="<?= $s['client_id'] ? '0' : '1' ?>"
+        data-status="<?= e($status) ?>">
 
         <!-- Bulk select -->
         <td class="px-3 py-2.5 w-8">
@@ -24,6 +28,9 @@ function siteRow(array $s, array $allClients, bool $ploiConnected): void { ?>
             <a href="/sites/<?= $s['id'] ?>" class="text-accent-600 hover:underline">
                 <?= e($s['domain_name'] ?: '—') ?>
             </a>
+            <?php if ($status === 'archived'): ?>
+                <span class="ml-1 px-1.5 py-0.5 rounded text-[10px] font-medium <?= statusBadge('archived') ?>">Archived</span>
+            <?php endif ?>
             <?php if ($s['git_repo']): ?>
                 <a href="<?= e($s['git_repo']) ?>" target="_blank" rel="noopener" class="ml-1 text-slate-400 hover:text-slate-700" title="Git repo">↗</a>
             <?php endif ?>
@@ -115,9 +122,31 @@ function siteRow(array $s, array $allClients, bool $ploiConnected): void { ?>
         </td>
         <?php endif ?>
 
+        <?php if ($wpmgrConnected): ?>
+        <!-- WPMGR Status -->
+        <td class="px-4 py-2.5 text-sm">
+            <?php if ($s['wpmgr_site_id']): ?>
+                <span class="flex items-center gap-1">
+                    <span class="w-1.5 h-1.5 rounded-full <?= $s['wpmgr_health_status'] === 'healthy' ? 'bg-green-400' : 'bg-slate-300' ?>"></span>
+                    <span class="text-slate-600"><?= e($s['wpmgr_wp_version'] ?: '?') ?></span>
+                    <?php if ((int)($s['wpmgr_updates_available'] ?? 0) > 0): ?>
+                        <span class="px-1 py-0.5 rounded text-[10px] bg-amber-100 text-amber-800"><?= (int)$s['wpmgr_updates_available'] ?></span>
+                    <?php endif ?>
+                </span>
+            <?php else: ?>
+                <span class="text-slate-200">—</span>
+            <?php endif ?>
+        </td>
+        <?php endif ?>
+
         <!-- Actions -->
         <td class="px-4 py-2.5 text-right text-xs whitespace-nowrap">
             <a href="/sites/<?= $s['id'] ?>/edit" class="text-slate-400 hover:text-slate-700 mr-2">Edit</a>
+            <form method="POST" action="/sites/<?= $s['id'] ?>/archive" class="inline">
+                <button type="submit"
+                        onclick="return confirm('<?= $status === 'archived' ? 'Restore this site?' : 'Archive this site? It will be excluded from cost apportionment and health checks.' ?>')"
+                        class="text-slate-400 hover:text-slate-700 mr-2"><?= $status === 'archived' ? 'Restore' : 'Archive' ?></button>
+            </form>
             <form method="POST" action="/sites/<?= $s['id'] ?>/delete" class="inline">
                 <button type="submit"
                         onclick="return confirm('Delete this site?')"
@@ -127,7 +156,7 @@ function siteRow(array $s, array $allClients, bool $ploiConnected): void { ?>
     </tr>
 <?php }
 
-function tableHeader(bool $ploiConnected): void { ?>
+function tableHeader(bool $ploiConnected, bool $wpmgrConnected): void { ?>
     <thead class="bg-slate-50 text-xs text-slate-500 uppercase tracking-wide sticky top-0">
         <tr>
             <th class="px-3 py-2.5 w-8">
@@ -143,6 +172,7 @@ function tableHeader(bool $ploiConnected): void { ?>
             <th class="px-4 py-2.5 text-left hidden xl:table-cell">Git Repo</th>
             <th class="px-4 py-2.5 text-center">CI/CD</th>
             <?php if ($ploiConnected): ?><th class="px-4 py-2.5 text-left">Ploi</th><?php endif ?>
+            <?php if ($wpmgrConnected): ?><th class="px-4 py-2.5 text-left">WP</th><?php endif ?>
             <th class="px-4 py-2.5"></th>
         </tr>
     </thead>
@@ -203,6 +233,13 @@ function tableHeader(bool $ploiConnected): void { ?>
             <?php endforeach ?>
         </select>
 
+        <select id="filter-status" onchange="applyFilters()"
+                class="border border-slate-300 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-accent-500">
+            <option value="active">Active</option>
+            <option value="archived">Archived</option>
+            <option value="all">All</option>
+        </select>
+
         <label class="flex items-center gap-2 text-sm text-slate-600 cursor-pointer">
             <input type="checkbox" id="filter-unassigned" onchange="applyFilters()" <?= $qUnassigned ? 'checked' : '' ?>
                    class="rounded border-slate-300 text-accent-600 focus:ring-accent-500">
@@ -218,9 +255,9 @@ function tableHeader(bool $ploiConnected): void { ?>
 
         <?php if ($group === 'all'): ?>
             <table class="w-full text-sm" id="site-table">
-                <?php tableHeader($ploiConnected) ?>
+                <?php tableHeader($ploiConnected, $wpmgrConnected) ?>
                 <tbody class="divide-y divide-slate-100" id="site-tbody">
-                    <?php foreach ($sites as $s): siteRow($s, $allClients, $ploiConnected); endforeach ?>
+                    <?php foreach ($sites as $s): siteRow($s, $allClients, $ploiConnected, $wpmgrConnected); endforeach ?>
                     <tr id="no-results" class="hidden">
                         <td colspan="20" class="px-4 py-8 text-center text-sm text-slate-400">No sites match the current filters.</td>
                     </tr>
@@ -238,9 +275,9 @@ function tableHeader(bool $ploiConnected): void { ?>
                         <span class="text-xs text-slate-400"><?= count($groupSites) ?> site<?= count($groupSites) !== 1 ? 's' : '' ?></span>
                     </div>
                     <table class="w-full text-sm">
-                        <?php tableHeader($ploiConnected) ?>
+                        <?php tableHeader($ploiConnected, $wpmgrConnected) ?>
                         <tbody class="divide-y divide-slate-100">
-                            <?php foreach ($groupSites as $s): siteRow($s, $allClients, $ploiConnected); endforeach ?>
+                            <?php foreach ($groupSites as $s): siteRow($s, $allClients, $ploiConnected, $wpmgrConnected); endforeach ?>
                         </tbody>
                     </table>
                 </div>
@@ -282,6 +319,25 @@ function tableHeader(bool $ploiConnected): void { ?>
     </form>
 </div>
 
+<!-- Bulk archive bar -->
+<div id="site-bulk-archive-bar"
+     class="hidden fixed bottom-14 left-0 right-0 lg:left-56 bg-slate-800 text-white px-5 py-3 shadow-lg z-30">
+    <form method="POST" action="/sites/bulk-archive" id="site-bulk-archive-form"
+          class="flex flex-wrap items-center gap-3 text-sm">
+        <?= csrfField() ?>
+        <div id="site-bulk-archive-ids"></div>
+
+        <span id="site-bulk-archive-count" class="font-medium">0 sites selected</span>
+
+        <button type="submit"
+                class="px-3 py-1.5 bg-red-600 hover:bg-red-700 rounded text-sm font-medium">
+            Archive
+        </button>
+        <button type="button" onclick="clearSiteSelection()"
+                class="text-slate-300 hover:text-white text-xs ml-auto">Clear selection</button>
+    </form>
+</div>
+
 <script>
 // ── Bulk selection / server move ────────────────────────────────────────────
 function visibleSiteCheckboxes() {
@@ -306,18 +362,29 @@ function clearSiteSelection() {
 function updateSiteBulkBar() {
     const ids = getCheckedSiteIds();
     const bar = document.getElementById('site-bulk-bar');
+    const archiveBar = document.getElementById('site-bulk-archive-bar');
 
     document.getElementById('site-bulk-count').textContent =
         ids.length + ' site' + (ids.length !== 1 ? 's' : '') + ' selected';
     bar.classList.toggle('hidden', ids.length === 0);
 
-    // Rebuild the hidden inputs the form posts.
+    document.getElementById('site-bulk-archive-count').textContent =
+        ids.length + ' site' + (ids.length !== 1 ? 's' : '') + ' selected';
+    archiveBar.classList.toggle('hidden', ids.length === 0);
+
+    // Rebuild the hidden inputs the forms post.
     const holder = document.getElementById('site-bulk-ids');
     holder.innerHTML = '';
+    const archiveHolder = document.getElementById('site-bulk-archive-ids');
+    archiveHolder.innerHTML = '';
     ids.forEach(id => {
         const inp = document.createElement('input');
         inp.type = 'hidden'; inp.name = 'site_ids[]'; inp.value = id;
         holder.appendChild(inp);
+
+        const inp2 = document.createElement('input');
+        inp2.type = 'hidden'; inp2.name = 'site_ids[]'; inp2.value = id;
+        archiveHolder.appendChild(inp2);
     });
 
     // Sync each select-all box against its own visible rows.
@@ -343,10 +410,19 @@ document.getElementById('site-bulk-form').addEventListener('submit', function(e)
     if (sel.value === '__none__') sel.value = '';
 });
 
+document.getElementById('site-bulk-archive-form').addEventListener('submit', function(e) {
+    const ids = getCheckedSiteIds();
+    if (!ids.length) { e.preventDefault(); return; }
+    if (!confirm('Archive ' + ids.length + ' site' + (ids.length !== 1 ? 's' : '') + '?')) {
+        e.preventDefault();
+    }
+});
+
 function applyFilters() {
     const search     = document.getElementById('filter-search').value.toLowerCase();
     const server     = document.getElementById('filter-server').value;
     const stack      = document.getElementById('filter-stack').value;
+    const status     = document.getElementById('filter-status').value;
     const unassigned = document.getElementById('filter-unassigned').checked;
 
     const rows = document.querySelectorAll('.site-row');
@@ -356,9 +432,10 @@ function applyFilters() {
         const domainMatch  = !search     || row.dataset.domain.includes(search);
         const serverMatch  = !server     || row.dataset.server === server;
         const stackMatch   = !stack      || row.dataset.stack === stack;
+        const statusMatch  = status === 'all' || row.dataset.status === status;
         const unassMatch   = !unassigned || row.dataset.unassigned === '1';
 
-        const show = domainMatch && serverMatch && stackMatch && unassMatch;
+        const show = domainMatch && serverMatch && stackMatch && statusMatch && unassMatch;
         row.style.display = show ? '' : 'none';
         if (show) visible++;
 
@@ -391,6 +468,7 @@ function clearFilters() {
     document.getElementById('filter-search').value = '';
     document.getElementById('filter-server').value = '';
     document.getElementById('filter-stack').value  = '';
+    document.getElementById('filter-status').value = 'active';
     document.getElementById('filter-unassigned').checked = false;
     applyFilters();
 }
@@ -475,11 +553,15 @@ function saveClientLink(siteId, select) {
     .catch(() => alert('Save failed. Please try again.'));
 }
 
-// Apply initial filter state from URL params on load
+// Apply initial filter state on load. Status defaults to "Active", which
+// must hide archived rows even when no other filter/URL param is set.
 document.addEventListener('DOMContentLoaded', () => {
     const search = <?= json_encode($qSearch) ?>;
     const server = <?= json_encode($qServer) ?>;
     const stack  = <?= json_encode(strtolower($qStack)) ?>;
-    if (search || server || stack || <?= $qUnassigned ? 'true' : 'false' ?>) applyFilters();
+    document.getElementById('filter-search').value = search;
+    document.getElementById('filter-server').value = server;
+    document.getElementById('filter-stack').value  = stack;
+    applyFilters();
 });
 </script>

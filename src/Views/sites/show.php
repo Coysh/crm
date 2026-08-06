@@ -3,7 +3,12 @@
     <!-- Header -->
     <div class="flex items-start justify-between gap-4">
         <div>
-            <h1 class="text-xl font-semibold text-slate-800"><?= e($site['domain_name'] ?? 'Unnamed Site') ?></h1>
+            <h1 class="text-xl font-semibold text-slate-800 flex items-center gap-2">
+                <?= e($site['domain_name'] ?? 'Unnamed Site') ?>
+                <?php if (($site['status'] ?? 'active') === 'archived'): ?>
+                    <span class="px-2 py-0.5 rounded text-xs font-medium <?= statusBadge('archived') ?>">Archived</span>
+                <?php endif ?>
+            </h1>
             <?php if ($site['client_name']): ?>
                 <p class="text-sm text-slate-500 mt-0.5">
                     <a href="/clients/<?= $site['client_id'] ?>" class="text-accent-600 hover:underline"><?= e($site['client_name']) ?></a>
@@ -24,6 +29,14 @@
                     Client view
                 </a>
             <?php endif ?>
+            <?php $siteStatus = $site['status'] ?? 'active'; ?>
+            <form method="POST" action="/sites/<?= $site['id'] ?>/archive" class="inline">
+                <button type="submit"
+                        onclick="return confirm('<?= $siteStatus === 'archived' ? 'Restore this site?' : 'Archive this site? It will be excluded from cost apportionment and health checks.' ?>')"
+                        class="px-3 py-1.5 text-sm border border-slate-300 rounded hover:bg-slate-50 text-slate-600">
+                    <?= $siteStatus === 'archived' ? 'Restore' : 'Archive' ?>
+                </button>
+            </form>
             <form method="POST" action="/sites/<?= $site['id'] ?>/delete" class="inline">
                 <button type="submit"
                         onclick="return confirm('Delete this site? This cannot be undone.')"
@@ -137,6 +150,37 @@
                 <div class="px-5 py-3 flex gap-4">
                     <dt class="text-sm text-slate-500 w-36 shrink-0"><?= $label ?></dt>
                     <dd class="text-sm font-mono text-xs text-slate-800"><?= e($value) ?></dd>
+                </div>
+            <?php endforeach ?>
+        </dl>
+    </div>
+    <?php endif ?>
+
+    <!-- WPMGR details -->
+    <?php if ($site['wpmgr_site_id']): ?>
+    <div class="bg-white border border-slate-200 rounded-lg overflow-hidden">
+        <div class="px-5 py-3 border-b border-slate-200 bg-slate-50 flex items-center gap-2">
+            <h2 class="text-sm font-semibold text-slate-700">WPMGR</h2>
+            <span class="flex items-center gap-1 text-xs text-slate-500">
+                <span class="w-1.5 h-1.5 rounded-full <?= $site['wpmgr_health_status'] === 'healthy' ? 'bg-green-400' : 'bg-slate-300' ?>"></span>
+                <?= e($site['wpmgr_health_status'] ?? 'unknown') ?>
+            </span>
+        </div>
+        <dl class="divide-y divide-slate-100">
+            <?php
+            $wpmgrFields = [
+                'WordPress Version' => $site['wpmgr_wp_version'],
+                'PHP Version'       => $site['wpmgr_php_version'],
+                'Updates Available' => $site['wpmgr_updates_available'] ? (int)$site['wpmgr_updates_available'] : null,
+                'Last Backup'       => $site['wpmgr_last_backup_at'] ? formatDate($site['wpmgr_last_backup_at']) . ' (' . e($site['wpmgr_last_backup_status'] ?? '?') . ')' : null,
+                'Uptime (30d)'      => $site['wpmgr_uptime_pct'] !== null ? number_format((float)$site['wpmgr_uptime_pct'], 2) . '%' : null,
+                'TLS Expires'       => $site['wpmgr_tls_expires_at'] ? formatDate($site['wpmgr_tls_expires_at']) : null,
+                'Connection State'  => $site['wpmgr_connection_state'],
+            ];
+            foreach ($wpmgrFields as $label => $value): if ($value === null || $value === '') continue; ?>
+                <div class="px-5 py-3 flex gap-4">
+                    <dt class="text-sm text-slate-500 w-36 shrink-0"><?= $label ?></dt>
+                    <dd class="text-sm text-slate-800"><?= $value ?></dd>
                 </div>
             <?php endforeach ?>
         </dl>

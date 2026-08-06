@@ -263,7 +263,10 @@ class PloiSync
                             // different server in Ploi, follow that move — otherwise
                             // client_sites.server_id silently keeps pointing at the old
                             // server, skewing the sites/servers views and the
-                            // server-linked recurring cost apportionment.
+                            // server-linked recurring cost apportionment. Deliberately
+                            // doesn't touch `status` — a dead (archived) site's recorded
+                            // infrastructure should still stay accurate even though it's
+                            // no longer billable.
                             $this->db->prepare(
                                 "UPDATE client_sites SET server_id = ?
                                  WHERE id = ? AND (server_id IS NULL OR server_id != ?)"
@@ -447,6 +450,12 @@ class PloiSync
      * rebuilt on a new server leaves behind. Prefers a record with a client on
      * it, then the oldest.
      */
+    /**
+     * Deliberately excludes archived sites: a re-appearing domain never
+     * silently reactivates a site the user archived from the CRM. It falls
+     * through to the normal "create a new empty client_sites row" path
+     * instead — a human has to hit Restore if it's really the same site.
+     */
     private function findUnlinkedClientSite(string $domain): ?int
     {
         if ($domain === '' || str_contains($domain, '.ploi.site') || str_contains($domain, '.ploi-app.site')) {
@@ -458,6 +467,7 @@ class PloiSync
                 FROM client_sites cs
                 JOIN domains d ON d.id = cs.domain_id
                 WHERE LOWER(d.domain) = LOWER(?)
+                  AND COALESCE(cs.status, 'active') = 'active'
                   AND NOT EXISTS (SELECT 1 FROM ploi_sites p WHERE p.client_site_id = cs.id)
                 ORDER BY cs.client_id IS NULL, cs.id
                 LIMIT 1

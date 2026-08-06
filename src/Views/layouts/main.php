@@ -33,12 +33,17 @@
         global $db;
         $faConnected = false;
         $ploiConnected = false;
+        $wpmgrConnected = false;
         if (isset($db)) {
             try {
                 $faRow = $db->query("SELECT access_token FROM freeagent_config WHERE id = 1")->fetch();
                 $faConnected = !empty($faRow['access_token']);
                 $ploiRow = $db->query("SELECT api_token FROM ploi_config WHERE id = 1")->fetch();
                 $ploiConnected = !empty($ploiRow['api_token']);
+            } catch (\Throwable) {}
+            try {
+                $wpmgrRow = $db->query("SELECT api_key FROM wpmgr_config WHERE id = 1")->fetch();
+                $wpmgrConnected = !empty($wpmgrRow['api_key']);
             } catch (\Throwable) {}
         }
 
@@ -93,6 +98,10 @@
             <a href="/settings/ploi" class="flex items-center gap-2 text-xs mt-1 <?= $ploiConnected ? 'text-green-400' : 'text-slate-500 hover:text-slate-300' ?>">
                 <span class="w-1.5 h-1.5 rounded-full <?= $ploiConnected ? 'bg-green-400' : 'bg-slate-600' ?>"></span>
                 <?= $ploiConnected ? 'Ploi connected' : 'Ploi not connected' ?>
+            </a>
+            <a href="/settings/wpmgr" class="flex items-center gap-2 text-xs mt-1 <?= $wpmgrConnected ? 'text-green-400' : 'text-slate-500 hover:text-slate-300' ?>">
+                <span class="w-1.5 h-1.5 rounded-full <?= $wpmgrConnected ? 'bg-green-400' : 'bg-slate-600' ?>"></span>
+                <?= $wpmgrConnected ? 'WPMGR connected' : 'WPMGR not connected' ?>
             </a>
         </div>
 

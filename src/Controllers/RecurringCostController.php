@@ -178,7 +178,9 @@ class RecurringCostController
     private function fetchSitesGrouped(): array
     {
         $rows = $this->db->query("
-            SELECT cs.id, cs.client_id, c.name AS client_name, COALESCE(d.domain, 'Site #'||cs.id) AS domain_label
+            SELECT cs.id, cs.client_id, c.name AS client_name,
+                   COALESCE(d.domain, 'Site #'||cs.id) AS domain_label,
+                   COALESCE(cs.status, 'active') AS status
             FROM client_sites cs
             LEFT JOIN clients c ON c.id = cs.client_id
             LEFT JOIN domains d ON d.id = cs.domain_id
@@ -187,6 +189,7 @@ class RecurringCostController
 
         $grouped = [];
         foreach ($rows as $r) {
+            if ($r['status'] === 'archived') $r['domain_label'] .= ' (archived)';
             $grouped[$r['client_name'] ?? 'Unassigned'][] = $r;
         }
         return $grouped;

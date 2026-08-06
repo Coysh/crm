@@ -111,6 +111,9 @@ $router->post('/sites', function () use ($db) {
 $router->post('/sites/bulk-server', function () use ($db) {
     (new CoyshCRM\Controllers\SiteController($db))->bulkUpdateServer();
 });
+$router->post('/sites/bulk-archive', function () use ($db) {
+    (new CoyshCRM\Controllers\SiteController($db))->bulkArchive();
+});
 $router->get('/sites/matching', function () use ($db) {
     (new CoyshCRM\Controllers\SiteController($db))->matching();
 });
@@ -125,6 +128,9 @@ $router->post('/sites/(\d+)', function ($id) use ($db) {
 });
 $router->post('/sites/(\d+)/client', function ($id) use ($db) {
     (new CoyshCRM\Controllers\SiteController($db))->updateClient((int)$id);
+});
+$router->post('/sites/(\d+)/archive', function ($id) use ($db) {
+    (new CoyshCRM\Controllers\SiteController($db))->archive((int)$id);
 });
 $router->post('/sites/(\d+)/delete', function ($id) use ($db) {
     (new CoyshCRM\Controllers\SiteController($db))->destroy((int)$id);
@@ -476,6 +482,26 @@ $router->post('/settings/ploi/servers/(\d+)/exclude', function ($ploiId) use ($d
 });
 $router->post('/settings/ploi/server-exclusions/(\d+)/remove', function ($id) use ($db) {
     (new CoyshCRM\Controllers\SettingsController($db))->removePloiServerExclusion((int)$id);
+});
+
+// ── WPMGR Settings ─────────────────────────────────────────────────────────
+$router->get('/settings/wpmgr', function () use ($db) {
+    (new CoyshCRM\Controllers\SettingsController($db))->wpmgr();
+});
+$router->post('/settings/wpmgr', function () use ($db) {
+    (new CoyshCRM\Controllers\SettingsController($db))->saveWpmgr();
+});
+$router->post('/settings/wpmgr/test', function () use ($db) {
+    (new CoyshCRM\Controllers\SettingsController($db))->testWpmgr();
+});
+$router->post('/settings/wpmgr/sync', function () use ($db) {
+    (new CoyshCRM\Controllers\SettingsController($db))->syncWpmgr();
+});
+$router->post('/settings/wpmgr/disconnect', function () use ($db) {
+    (new CoyshCRM\Controllers\SettingsController($db))->disconnectWpmgr();
+});
+$router->post('/settings/wpmgr/errors/dismiss', function () use ($db) {
+    (new CoyshCRM\Controllers\SettingsController($db))->dismissWpmgrError();
 });
 
 // ── Cloudflare Settings ────────────────────────────────────────────────────

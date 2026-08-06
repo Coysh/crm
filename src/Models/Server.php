@@ -11,6 +11,7 @@ class Server extends Model
     public function findAllWithStats(): array
     {
         $hasServerCol = $this->hasRecurringServerIdColumn();
+        $siteActive   = $this->hasSiteStatusColumn() ? " AND COALESCE(cs.status,'active')='active'" : '';
         if ($hasServerCol) {
             return $this->query("
                 SELECT s.*, ps.os_name, ps.os_version,
@@ -23,7 +24,7 @@ class Server extends Model
                             THEN ROUND(COALESCE(CASE WHEN rc.billing_cycle = 'annual' THEN rc.amount / 12.0 ELSE rc.amount END, 0) / COUNT(DISTINCT cs.client_id), 2)
                             ELSE COALESCE(CASE WHEN rc.billing_cycle = 'annual' THEN rc.amount / 12.0 ELSE rc.amount END, 0) END AS cost_per_client
                 FROM servers s
-                LEFT JOIN client_sites cs ON cs.server_id = s.id
+                LEFT JOIN client_sites cs ON cs.server_id = s.id{$siteActive}
                 LEFT JOIN ploi_servers ps ON ps.server_id = s.id
                 LEFT JOIN recurring_costs rc ON rc.server_id = s.id AND rc.is_active = 1
                 GROUP BY s.id
@@ -42,7 +43,7 @@ class Server extends Model
                         THEN ROUND(s.monthly_cost / COUNT(DISTINCT cs.client_id), 2)
                         ELSE s.monthly_cost END AS cost_per_client
             FROM servers s
-            LEFT JOIN client_sites cs ON cs.server_id = s.id
+            LEFT JOIN client_sites cs ON cs.server_id = s.id{$siteActive}
             LEFT JOIN ploi_servers ps ON ps.server_id = s.id
             GROUP BY s.id
             ORDER BY s.name
@@ -69,6 +70,19 @@ class Server extends Model
         if ($checked !== null) return $checked;
         try {
             $this->query("SELECT server_id FROM recurring_costs LIMIT 0");
+            $checked = true;
+        } catch (\Throwable) {
+            $checked = false;
+        }
+        return $checked;
+    }
+
+    private function hasSiteStatusColumn(): bool
+    {
+        static $checked = null;
+        if ($checked !== null) return $checked;
+        try {
+            $this->query("SELECT status FROM client_sites LIMIT 0");
             $checked = true;
         } catch (\Throwable) {
             $checked = false;

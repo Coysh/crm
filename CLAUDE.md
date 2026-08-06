@@ -59,7 +59,7 @@ No test suite currently. There are no linting commands configured.
   Guard-exempt paths: auth routes, static assets, `/.well-known/*`, `/mcp`,
   `/oauth/register`, `/oauth/token` (the latter three use bearer/PKCE auth instead).
   `/oauth/authorize` + `/oauth/approve` deliberately stay behind the session guard.
-- **Secrets at rest:** API tokens (FreeAgent/Ploi/Cloudflare) and TOTP seeds are
+- **Secrets at rest:** API tokens (FreeAgent/Ploi/Cloudflare/WPMGR) and TOTP seeds are
   encrypted via `Services\Secrets` (libsodium). Key from `APP_KEY` env, falling back
   to `data/app.key` (auto-created, gitignored). Encrypted values are prefixed
   `enc:v1:`; decrypt tolerates legacy plaintext.
@@ -75,7 +75,7 @@ Request flow: `public/index.php` (front controller) → `src/bootstrap.php` (DB 
 - Controllers handle HTTP requests and delegate to models; no base controller class
 - Models extend `Models\Model` (raw PDO, no ORM)
 - Views are plain PHP templates; `src/Views/layouts/main.php` wraps app pages, `layouts/auth.php` wraps login/consent pages
-- Migrations are numbered SQL files in `migrations/` (currently 001–028) run in order by `scripts/migrate.php`, tracked in `_migrations`
+- Migrations are numbered SQL files in `migrations/` (currently 001–031) run in order by `scripts/migrate.php`, tracked in `_migrations`
 - Shared helpers live in `src/bootstrap.php`: `render()`, `redirect()`, `flash()`, `csrfToken/csrfField/csrfCheck()`, `e()`, `money()`, `formatCurrency()`, `formatDate()`, `statusBadge()`, `healthFlagLabel()`, `appUrl()`
 - Column feature-detection via `try { SELECT col LIMIT 0 } catch` is used to tolerate partially-migrated DBs — follow the same pattern for new columns
 
@@ -90,6 +90,8 @@ Request flow: `public/index.php` (front controller) → `src/bootstrap.php` (DB 
 - Domain cost per client = `domain.annual_cost / 12` (FX-converted)
 
 **Per-client P&L:** `Client::getPL()` (one client) and `Client::getPLAll()` (all active clients in a few grouped queries — use this on list pages/dashboard; pass its result to `Client::getHealthAll($plAll)` to avoid recomputation).
+
+**Site archiving (migration 030):** `client_sites.status` (`active` | `archived`, default `active`) marks a site as no longer hosted/no longer under contract without deleting its history. Toggled via `SiteController::archive()`/`bulkArchive()` (`POST /sites/{id}/archive`, `POST /sites/bulk-archive`) — a single toggle, same shape as `DomainListController::archive()`, so "Restore" is the same endpoint. Unlike `/domains` and `/clients` (server-side `?status=` filtering), **`/sites` filters entirely client-side in JS** (`applyFilters()` in `sites/index.php`), so the Status filter defaults to Active by hiding archived rows via a `data-status` attribute rather than a SQL `WHERE`. Archived sites are excluded (active-only) from cost apportionment, `site_count`, and the `incomplete_setup` health check via `Client::hasSiteStatusColumn()`/`siteStatusFilter()` and equivalents in `RecurringCost`/`Server`/`DataQualityController` — but still shown (labelled) in the recurring-cost site picker, and `PloiSync::findUnlinkedClientSite()` deliberately won't silently re-adopt an archived site when its domain reappears in a Ploi sync.
 
 **Projects ↔ invoices (migration 029):** `project_invoice_links` is a manual many-to-many between `projects` and `freeagent_invoices` (same shape as `domain_invoice_links`). **`projects.income_invoiced` is derived, not typed** — `Project::syncInvoiceLinks()` replaces the links and recomputes the column from them (net, `COALESCE(net_value, total_value)`) in one transaction. It is deliberately *not* in `ProjectController::sanitise()`, so nothing else can overwrite it. The picker on the project form fetches candidates from `GET /projects/invoice-options?client_id=N[&project_id=M]`; only invoices belonging to the project's own client are accepted. An invoice may be linked to more than one project (the picker warns).
 
@@ -115,7 +117,7 @@ Request flow: `public/index.php` (front controller) → `src/bootstrap.php` (DB 
 
 ## Integrations
 
-All optional — core CRM works without them. Config in per-integration tables (`ploi_config`, `cloudflare_config`, `freeagent_config`), tokens encrypted.
+All optional — core CRM works without them. Config in per-integration tables (`ploi_config`, `cloudflare_config`, `freeagent_config`, `wpmgr_config`), tokens encrypted.
 
 - **FreeAgent** (OAuth2): contacts, invoices (incl. `net_value`/`sales_tax_value`), recurring invoices, bills, bank transactions. `Services\FreeAgentClient` + `FreeAgentSync`.
 - **Ploi** (read-only): servers/sites mirrored into `ploi_servers`/`ploi_sites` by Ploi numeric ID. Records deleted in Ploi are marked `is_stale = 1` and skipped by later syncs (purge them from `/settings/ploi`). `ploi_sync_exclusions` (sites) and `ploi_server_exclusions` (servers) stop deleted records re-importing. Sync errors log to `ploi_sync_log`; the settings page shows only undismissed failures newer than the last successful full sync.
@@ -124,6 +126,7 @@ All optional — core CRM works without them. Config in per-integration tables (
   **Server decommissioned in Ploi:** a site rebuilt on another server arrives with a *new* Ploi id, so the sync creates a second, empty `client_sites` row beside the curated one, which goes stale with its old server. `PloiSync::staleReport()` pairs each stale site with the live site serving the same domain, and the panel on `/settings/ploi` → `POST /settings/ploi/stale/reconcile` (`reconcileStale()`) transfers, keeps or deletes each CRM record before dropping the stale mirror rows. A transfer keeps the curated `client_sites` row (backfilling only blank columns from the throwaway one), repoints `ploi_sites.client_site_id` and `recurring_cost_clients`, moves it to the new `servers` row, then deletes the duplicate. CRM `servers` rows are only removed once nothing (sites, recurring costs, expenses, live Ploi mirrors) points at them.
   Two safety nets for when that pairing is no longer possible because the stale rows were purged first: `syncSites()` adopts an existing unlinked `client_sites` row for the same domain (`findUnlinkedClientSite()`) instead of starting an empty duplicate, and `duplicateSiteReport()` / `mergeDuplicateSites()` (panel on `/settings/ploi` → `POST /settings/ploi/duplicates/merge`) pair a stranded record with the live site's empty one **by domain**, keeping whichever carries the client. A pair with a *different* client on each side is refused — those need merging by hand.
 - **Cloudflare:** zones/DNS mirrored, matched to `domains` by name.
+- **WPMGR** (read-only, migration 031): WordPress fleet data (version, updates available, backup/uptime/TLS status) from a self-hosted WPMGR instance (`base_url`, e.g. `https://wpmgr.example.com`), mirrored into `wpmgr_sites` by WPMGR's UUID (`wpmgr_id`, TEXT — unlike Ploi's integer `ploi_id`). Auth is `Authorization: Bearer wpmgr_<prefix>_<secret>`; `Services\WpmgrService` is a raw REST client (no SDK exists) modelled on `CloudflareService`'s `file_get_contents()` pattern, not Ploi's SDK wrapper. `Services\WpmgrSync::matchClientSite()` links to `client_sites` by domain match against `domains.domain` — **unlike Ploi, it never auto-creates `client_sites`/`domains` rows for an unmatched site**; an unmatched WPMGR site stays purely informational (`client_site_id` NULL, visible on `/settings/wpmgr`) since it usually already has a Ploi-synced counterpart. The link is re-resolved on every sync rather than locked in once made. Deleted-in-WPMGR sites are flagged `is_stale = 1`, never deleted. WPMGR's own `connection_state` (its internal archived/disconnected states) and this CRM's `client_sites.status` are deliberately orthogonal — neither reads nor writes the other.
 
 ## MCP Server (migration 028)
 
@@ -183,4 +186,4 @@ attribute early.
 
 - New browser-form POST endpoints must call `csrfCheck()` and render `csrfField()` in their forms (legacy forms predate this; `/mcp`, `/oauth/token`, `/oauth/register` are correctly CSRF-exempt — no session semantics)
 - Never echo decrypted secrets into HTML (masked placeholder + empty value instead)
-- Next migration number: 030
+- Next migration number: 032
