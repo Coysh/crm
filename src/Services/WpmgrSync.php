@@ -148,10 +148,16 @@ class WpmgrSync
      * and WPMGR's own connection_state ('archived' etc.) is unrelated and
      * purely informational here.
      */
-    private function matchClientSite(string $url): ?int
+    /** Bare, lowercased, www-stripped host from a WPMGR site URL. */
+    public static function hostFromUrl(string $url): string
     {
         $host = parse_url($url, PHP_URL_HOST) ?: $url;
-        $host = preg_replace('/^www\./i', '', strtolower(trim($host)));
+        return preg_replace('/^www\./i', '', strtolower(trim($host))) ?? '';
+    }
+
+    private function matchClientSite(string $url): ?int
+    {
+        $host = self::hostFromUrl($url);
         if (!$host) return null;
 
         try {

@@ -248,6 +248,54 @@ class SettingsController
         redirect('/settings/wpmgr');
     }
 
+    /**
+     * Manually create a client_sites record (+ domain, if new) for an
+     * unmatched WPMGR site — e.g. a site the user manages via WPMGR but
+     * doesn't host, so it has no Ploi counterpart to have already created
+     * one. WpmgrSync itself never does this automatically (see its
+     * docblock); this is an explicit, one-off action from the settings page.
+     */
+    public function createSiteFromWpmgr(int $id): void
+    {
+        $stmt = $this->db->prepare("SELECT * FROM wpmgr_sites WHERE id = ?");
+        $stmt->execute([$id]);
+        $wpmgrSite = $stmt->fetch();
+        if (!$wpmgrSite) {
+            flash('error', 'WPMGR site not found.');
+            redirect('/settings/wpmgr');
+        }
+        if ($wpmgrSite['client_site_id']) {
+            flash('info', 'This WPMGR site is already linked to a CRM site.');
+            redirect('/settings/wpmgr');
+        }
+
+        $host = WpmgrSync::hostFromUrl($wpmgrSite['url']);
+        if (!$host) {
+            flash('error', 'Could not determine a domain from ' . $wpmgrSite['url'] . '.');
+            redirect('/settings/wpmgr');
+        }
+
+        $domRow = $this->db->prepare("SELECT id FROM domains WHERE LOWER(domain) = LOWER(?) LIMIT 1");
+        $domRow->execute([$host]);
+        $domainId = $domRow->fetchColumn();
+        if (!$domainId) {
+            $this->db->prepare(
+                "INSERT INTO domains (client_id, domain, cloudflare_proxied, created_at) VALUES (NULL, ?, 0, datetime('now'))"
+            )->execute([$host]);
+            $domainId = (int)$this->db->lastInsertId();
+        }
+
+        $this->db->prepare(
+            "INSERT INTO client_sites (client_id, domain_id, notes, created_at) VALUES (NULL, ?, ?, datetime('now'))"
+        )->execute([$domainId, 'Imported from WPMGR: ' . $wpmgrSite['url']]);
+        $clientSiteId = (int)$this->db->lastInsertId();
+
+        $this->db->prepare("UPDATE wpmgr_sites SET client_site_id = ? WHERE id = ?")->execute([$clientSiteId, $id]);
+
+        flash('success', "Site created for $host. Assign a client to finish setup.");
+        redirect("/sites/$clientSiteId/edit");
+    }
+
     public function savePloi(): void
     {
         $token = trim($_POST['api_token'] ?? '');

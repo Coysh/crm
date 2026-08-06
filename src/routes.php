@@ -503,6 +503,9 @@ $router->post('/settings/wpmgr/disconnect', function () use ($db) {
 $router->post('/settings/wpmgr/errors/dismiss', function () use ($db) {
     (new CoyshCRM\Controllers\SettingsController($db))->dismissWpmgrError();
 });
+$router->post('/settings/wpmgr/sites/(\d+)/create-site', function ($id) use ($db) {
+    (new CoyshCRM\Controllers\SettingsController($db))->createSiteFromWpmgr((int)$id);
+});
 
 // ── Cloudflare Settings ────────────────────────────────────────────────────
 $router->get('/settings/cloudflare', function () use ($db) {

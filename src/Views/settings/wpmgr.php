@@ -68,7 +68,12 @@
                             <?php if ($s['client_site_id']): ?>
                                 <a href="/sites/<?= (int)$s['client_site_id'] ?>" class="text-accent-600 hover:underline"><?= e($s['client_site_domain'] ?: ('Site #' . $s['client_site_id'])) ?></a>
                             <?php else: ?>
-                                <span class="text-amber-600">Unmatched</span>
+                                <span class="text-amber-600 mr-2">Unmatched</span>
+                                <form method="POST" action="/settings/wpmgr/sites/<?= (int)$s['id'] ?>/create-site" class="inline">
+                                    <button type="submit"
+                                            onclick="return confirm('Create a CRM site for this WPMGR site?')"
+                                            class="text-xs text-accent-600 hover:underline">Create Site</button>
+                                </form>
                             <?php endif ?>
                         </td>
                         <td class="px-4 py-2 text-xs text-slate-400"><?= $s['is_stale'] ? 'Yes' : '—' ?></td>
