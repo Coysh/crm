@@ -90,20 +90,38 @@
             retries and accepted status codes. Only the name and URL differ. Change it in Uptime Kuma and
             every monitor made from here afterwards follows suit.
         </p>
-        <form method="POST" action="/settings/uptime-kuma/template" class="flex items-center gap-2 mt-3">
-            <?= csrfField() ?>
-            <select name="template_monitor_id" class="border border-slate-300 rounded px-3 py-2 text-sm flex-1">
-                <option value="">— none chosen —</option>
-                <?php foreach ($monitors as $m): if (!$m['kuma_id']) continue; ?>
-                    <option value="<?= (int)$m['kuma_id'] ?>" <?= (int)($kumaCfg['template_monitor_id'] ?? 0) === (int)$m['kuma_id'] ? 'selected' : '' ?>>
-                        <?= e($m['monitor_name']) ?>
-                    </option>
-                <?php endforeach ?>
-            </select>
-            <button class="px-4 py-2 bg-accent-600 text-white text-sm rounded">Save</button>
-        </form>
-        <?php if (empty($kumaCfg['template_monitor_id'])): ?>
-            <p class="text-xs text-amber-600 mt-2">Choose a template before creating monitors.</p>
+        <?php
+        // Only monitors carrying Uptime Kuma's own id can be cloned. Rows left
+        // by the older /metrics sync have none until a Socket.IO sync adopts
+        // them, so an empty list here means "not synced yet", not "no monitors".
+        $templateOptions = array_values(array_filter($monitors, fn($m) => !empty($m['kuma_id']) && !$m['is_stale']));
+        ?>
+        <?php if (!$templateOptions): ?>
+            <div class="mt-3 flex flex-wrap items-center gap-3">
+                <form method="POST" action="/settings/uptime-kuma/sync">
+                    <?= csrfField() ?>
+                    <button class="px-4 py-2 bg-accent-600 text-white text-sm rounded">Sync monitors</button>
+                </form>
+                <p class="text-xs text-amber-600">
+                    No monitors loaded yet — run a sync to fetch them from Uptime Kuma, then pick one here.
+                </p>
+            </div>
+        <?php else: ?>
+            <form method="POST" action="/settings/uptime-kuma/template" class="flex items-center gap-2 mt-3">
+                <?= csrfField() ?>
+                <select name="template_monitor_id" class="border border-slate-300 rounded px-3 py-2 text-sm flex-1">
+                    <option value="">— none chosen —</option>
+                    <?php foreach ($templateOptions as $m): ?>
+                        <option value="<?= (int)$m['kuma_id'] ?>" <?= (int)($kumaCfg['template_monitor_id'] ?? 0) === (int)$m['kuma_id'] ? 'selected' : '' ?>>
+                            <?= e($m['monitor_name']) ?>
+                        </option>
+                    <?php endforeach ?>
+                </select>
+                <button class="px-4 py-2 bg-accent-600 text-white text-sm rounded">Save</button>
+            </form>
+            <?php if (empty($kumaCfg['template_monitor_id'])): ?>
+                <p class="text-xs text-amber-600 mt-2">Choose a template before creating monitors.</p>
+            <?php endif ?>
         <?php endif ?>
     </div>
 

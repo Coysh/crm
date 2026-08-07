@@ -113,7 +113,18 @@ class UptimeKumaController
 
         $this->kuma->saveCredentials($baseUrl, $username, $password);
         $this->kuma->storeJwt($jwt);
-        flash('success', 'Connected to Uptime Kuma. Monitor creation is now available.');
+
+        // Sync straight away. The template picker lists monitors from the local
+        // mirror and only those carrying Uptime Kuma's real id, which nothing
+        // has filled in yet — so without this, connecting successfully still
+        // leaves the picker empty with no hint why.
+        try {
+            $results = (new UptimeKumaSync($this->db, $this->kuma))->fullSync();
+            flash('success', "Connected to Uptime Kuma and synced {$results['monitors']} monitor(s). Choose a template below to enable monitor creation.");
+        } catch (\Throwable $e) {
+            flash('warning', 'Connected to Uptime Kuma, but the first sync failed: ' . $e->getMessage() . ' — try Sync Now.');
+        }
+
         redirect('/settings/uptime-kuma');
     }
 
