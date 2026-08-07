@@ -51,7 +51,12 @@ class UptimeKumaController
             ")->fetchAll();
         } catch (\Throwable) {}
 
-        // Active sites with no live monitor — the backfill worklist.
+        // Live sites with no monitor — the backfill worklist.
+        //
+        // Three separate archive flags have to be respected here, not just the
+        // site one: a site can be active while its client or its domain has
+        // been archived, and neither is worth monitoring. Sites with no client
+        // yet are kept — unassigned is not archived.
         $unmonitored = [];
         try {
             $unmonitored = $this->db->query("
@@ -60,6 +65,8 @@ class UptimeKumaController
                 LEFT JOIN domains d ON d.id = cs.domain_id
                 LEFT JOIN clients c ON c.id = cs.client_id
                 WHERE COALESCE(cs.status, 'active') = 'active'
+                  AND COALESCE(c.status, 'active') = 'active'
+                  AND COALESCE(d.status, 'active') = 'active'
                   AND d.domain IS NOT NULL
                   AND NOT EXISTS (
                       SELECT 1 FROM uptime_kuma_monitors m
