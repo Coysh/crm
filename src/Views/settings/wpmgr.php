@@ -65,8 +65,14 @@
                             <?php endif ?>
                         </td>
                         <td class="px-4 py-2 text-sm">
-                            <?php if ($s['client_site_id']): ?>
-                                <a href="/sites/<?= (int)$s['client_site_id'] ?>" class="text-accent-600 hover:underline"><?= e($s['client_site_domain'] ?: ('Site #' . $s['client_site_id'])) ?></a>
+                            <?php if ($s['client_site_id'] && $s['client_site_domain']): ?>
+                                <a href="/sites/<?= (int)$s['client_site_id'] ?>" class="text-accent-600 hover:underline"><?= e($s['client_site_domain']) ?></a>
+                            <?php elseif ($s['client_site_id']): ?>
+                                <a href="/sites/<?= (int)$s['client_site_id'] ?>" class="text-accent-600 hover:underline">Site #<?= (int)$s['client_site_id'] ?></a>
+                                <span class="text-amber-600 mx-1">no domain</span>
+                                <form method="POST" action="/settings/wpmgr/sites/<?= (int)$s['id'] ?>/fix-domain" class="inline">
+                                    <button type="submit" class="text-xs text-accent-600 hover:underline">Fix domain</button>
+                                </form>
                             <?php else: ?>
                                 <span class="text-amber-600 mr-2">Unmatched</span>
                                 <form method="POST" action="/settings/wpmgr/sites/<?= (int)$s['id'] ?>/create-site" class="inline">

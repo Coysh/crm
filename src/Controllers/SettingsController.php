@@ -269,10 +269,67 @@ class SettingsController
             redirect('/settings/wpmgr');
         }
 
+        try {
+            $domainId = $this->ensureWpmgrDomain($wpmgrSite);
+        } catch (\Throwable $e) {
+            flash('error', $e->getMessage());
+            redirect('/settings/wpmgr');
+        }
+
+        $this->db->prepare(
+            "INSERT INTO client_sites (client_id, domain_id, notes, created_at) VALUES (NULL, ?, ?, datetime('now'))"
+        )->execute([$domainId, 'Imported from WPMGR: ' . $wpmgrSite['url']]);
+        $clientSiteId = (int)$this->db->lastInsertId();
+
+        $this->db->prepare("UPDATE wpmgr_sites SET client_site_id = ? WHERE id = ?")->execute([$clientSiteId, $id]);
+
+        flash('success', 'Site created and linked. Assign a client to finish setup.');
+        redirect("/sites/$clientSiteId/edit");
+    }
+
+    /**
+     * Repairs a linked WPMGR site whose client_sites row lost its domain_id
+     * (e.g. the form_standalone.php domain-dropdown JS bug that cleared it
+     * whenever a client was assigned to a still-domainless site — fixed, but
+     * this heals any records created before the fix). Re-derives the domain
+     * from the WPMGR site's URL the same way createSiteFromWpmgr() does.
+     */
+    public function fixWpmgrSiteDomain(int $id): void
+    {
+        $stmt = $this->db->prepare(
+            "SELECT ws.*, cs.id AS cs_id, cs.domain_id AS cs_domain_id
+             FROM wpmgr_sites ws
+             LEFT JOIN client_sites cs ON cs.id = ws.client_site_id
+             WHERE ws.id = ?"
+        );
+        $stmt->execute([$id]);
+        $row = $stmt->fetch();
+
+        if (!$row || !$row['cs_id']) {
+            flash('error', 'This WPMGR site is not linked to a CRM site.');
+            redirect('/settings/wpmgr');
+        }
+        if ($row['cs_domain_id']) {
+            flash('info', 'This site already has a domain linked.');
+            redirect('/settings/wpmgr');
+        }
+
+        try {
+            $domainId = $this->ensureWpmgrDomain($row);
+            $this->db->prepare("UPDATE client_sites SET domain_id = ? WHERE id = ?")->execute([$domainId, $row['cs_id']]);
+            flash('success', 'Domain linked.');
+        } catch (\Throwable $e) {
+            flash('error', $e->getMessage());
+        }
+        redirect('/settings/wpmgr');
+    }
+
+    /** Find-or-create the domains row matching a WPMGR site's URL. */
+    private function ensureWpmgrDomain(array $wpmgrSite): int
+    {
         $host = WpmgrSync::hostFromUrl($wpmgrSite['url']);
         if (!$host) {
-            flash('error', 'Could not determine a domain from ' . $wpmgrSite['url'] . '.');
-            redirect('/settings/wpmgr');
+            throw new \RuntimeException('Could not determine a domain from ' . $wpmgrSite['url'] . '.');
         }
 
         $domRow = $this->db->prepare("SELECT id FROM domains WHERE LOWER(domain) = LOWER(?) LIMIT 1");
@@ -284,16 +341,7 @@ class SettingsController
             )->execute([$host]);
             $domainId = (int)$this->db->lastInsertId();
         }
-
-        $this->db->prepare(
-            "INSERT INTO client_sites (client_id, domain_id, notes, created_at) VALUES (NULL, ?, ?, datetime('now'))"
-        )->execute([$domainId, 'Imported from WPMGR: ' . $wpmgrSite['url']]);
-        $clientSiteId = (int)$this->db->lastInsertId();
-
-        $this->db->prepare("UPDATE wpmgr_sites SET client_site_id = ? WHERE id = ?")->execute([$clientSiteId, $id]);
-
-        flash('success', "Site created for $host. Assign a client to finish setup.");
-        redirect("/sites/$clientSiteId/edit");
+        return (int)$domainId;
     }
 
     public function savePloi(): void

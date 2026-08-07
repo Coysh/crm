@@ -506,6 +506,9 @@ $router->post('/settings/wpmgr/errors/dismiss', function () use ($db) {
 $router->post('/settings/wpmgr/sites/(\d+)/create-site', function ($id) use ($db) {
     (new CoyshCRM\Controllers\SettingsController($db))->createSiteFromWpmgr((int)$id);
 });
+$router->post('/settings/wpmgr/sites/(\d+)/fix-domain', function ($id) use ($db) {
+    (new CoyshCRM\Controllers\SettingsController($db))->fixWpmgrSiteDomain((int)$id);
+});
 
 // ── Cloudflare Settings ────────────────────────────────────────────────────
 $router->get('/settings/cloudflare', function () use ($db) {

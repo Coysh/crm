@@ -126,7 +126,9 @@ function filterDomains() {
     const domainSel = document.getElementById('domain_id');
     [...domainSel.options].forEach(opt => {
         if (!opt.value) return; // keep "None"
-        const match = !clientId || opt.dataset.client === clientId;
+        // An unassigned domain (no client yet) is always a valid pick —
+        // only hide domains that belong to a *different* specific client.
+        const match = !clientId || !opt.dataset.client || opt.dataset.client === clientId;
         opt.style.display = match ? '' : 'none';
         // Deselect hidden options
         if (!match && opt.selected) { opt.selected = false; domainSel.value = ''; }
