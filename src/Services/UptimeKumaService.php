@@ -27,36 +27,130 @@ class UptimeKumaService
     public function getConfig(): ?array
     {
         $row = $this->db->query("SELECT * FROM uptime_kuma_config WHERE id = 1")->fetch() ?: null;
-        return Secrets::decryptRow($row, ['api_key']);
+        return Secrets::decryptRow($row, ['api_key', 'password', 'jwt']);
     }
 
+    /**
+     * Connected for reading. Either credential set will do: Socket.IO is the
+     * richer source, but an existing /metrics-only setup keeps working.
+     */
     public function isConnected(): bool
     {
         $cfg = $this->getConfig();
-        return !empty($cfg['api_key']) && !empty($cfg['base_url']);
+        if (empty($cfg['base_url'])) return false;
+        return !empty($cfg['api_key']) || !empty($cfg['password']) || !empty($cfg['jwt']);
     }
 
-    public function saveConfig(string $baseUrl, string $apiKey): void
+    /** Socket.IO configured — the prerequisite for creating monitors. */
+    public function canWrite(): bool
+    {
+        $cfg = $this->getConfig();
+        return !empty($cfg['base_url'])
+            && !empty($cfg['username'])
+            && (!empty($cfg['password']) || !empty($cfg['jwt']));
+    }
+
+    public function saveCredentials(string $baseUrl, string $username, string $password): void
+    {
+        $baseUrl = self::normaliseBaseUrl($baseUrl);
+        $this->ensureRow();
+        $this->db->prepare(
+            "UPDATE uptime_kuma_config SET base_url = ?, username = ?, password = ?, jwt = NULL WHERE id = 1"
+        )->execute([$baseUrl, $username, Secrets::encrypt($password)]);
+    }
+
+    /** Cache the JWT a successful login returned, so later runs can skip 2FA. */
+    public function storeJwt(string $jwt): void
+    {
+        $this->ensureRow();
+        $this->db->prepare("UPDATE uptime_kuma_config SET jwt = ? WHERE id = 1")
+            ->execute([Secrets::encrypt($jwt)]);
+    }
+
+    public function clearJwt(): void
+    {
+        $this->db->exec("UPDATE uptime_kuma_config SET jwt = NULL WHERE id = 1");
+    }
+
+    public function setTemplateMonitorId(?int $kumaMonitorId): void
+    {
+        $this->ensureRow();
+        $this->db->prepare("UPDATE uptime_kuma_config SET template_monitor_id = ? WHERE id = 1")
+            ->execute([$kumaMonitorId]);
+    }
+
+    /**
+     * An authenticated Socket.IO session.
+     *
+     * Tries the cached JWT first — it is cheaper and, on an instance with 2FA
+     * enabled, the only thing that works unattended, since a password login
+     * would demand a fresh code every run. Falls back to the password when the
+     * JWT has been invalidated (changing the Uptime Kuma password does that).
+     *
+     * Callers must close() the returned socket.
+     */
+    public function openSession(): UptimeKumaSocket
+    {
+        $cfg = $this->getConfig();
+        if (empty($cfg['base_url'])) {
+            throw new RuntimeException('Uptime Kuma is not configured.');
+        }
+
+        $socket = new UptimeKumaSocket($cfg['base_url']);
+        $socket->connect();
+
+        if (!empty($cfg['jwt']) && $socket->loginByToken($cfg['jwt'])) {
+            return $socket;
+        }
+
+        if (empty($cfg['username']) || empty($cfg['password'])) {
+            $socket->close();
+            throw new RuntimeException('Uptime Kuma session expired and no password is stored — reconnect on /settings/uptime-kuma.');
+        }
+
+        try {
+            $jwt = $socket->login($cfg['username'], $cfg['password']);
+        } catch (RuntimeException $e) {
+            $socket->close();
+            throw $e;
+        }
+
+        $this->storeJwt($jwt);
+        return $socket;
+    }
+
+    private function ensureRow(): void
+    {
+        if (!$this->db->query("SELECT id FROM uptime_kuma_config WHERE id = 1")->fetch()) {
+            $this->db->exec("INSERT INTO uptime_kuma_config (id) VALUES (1)");
+        }
+    }
+
+    private static function normaliseBaseUrl(string $baseUrl): string
     {
         $baseUrl = rtrim(trim($baseUrl), '/');
         if ($baseUrl !== '' && !preg_match('#^https?://#i', $baseUrl)) {
             $baseUrl = 'https://' . $baseUrl;
         }
-        $encrypted = Secrets::encrypt($apiKey);
+        return $baseUrl;
+    }
 
-        $exists = $this->db->query("SELECT id FROM uptime_kuma_config WHERE id = 1")->fetch();
-        if ($exists) {
-            $this->db->prepare("UPDATE uptime_kuma_config SET base_url = ?, api_key = ? WHERE id = 1")
-                ->execute([$baseUrl, $encrypted]);
-            return;
-        }
-        $this->db->prepare("INSERT INTO uptime_kuma_config (id, base_url, api_key) VALUES (1, ?, ?)")
-            ->execute([$baseUrl, $encrypted]);
+    public function saveConfig(string $baseUrl, string $apiKey): void
+    {
+        $baseUrl = self::normaliseBaseUrl($baseUrl);
+        $this->ensureRow();
+        $this->db->prepare("UPDATE uptime_kuma_config SET base_url = ?, api_key = ? WHERE id = 1")
+            ->execute([$baseUrl, Secrets::encrypt($apiKey)]);
     }
 
     public function disconnect(): void
     {
-        $this->db->exec("UPDATE uptime_kuma_config SET api_key = NULL, last_sync_at = NULL WHERE id = 1");
+        $this->db->exec(
+            "UPDATE uptime_kuma_config
+             SET api_key = NULL, username = NULL, password = NULL, jwt = NULL,
+                 template_monitor_id = NULL, last_sync_at = NULL
+             WHERE id = 1"
+        );
     }
 
     /** Fetches /metrics and reports how many monitors it described. */
@@ -85,12 +179,15 @@ class UptimeKumaService
      */
     public static function siteRollupSql(): string
     {
+        // Paused monitors are excluded: a paused monitor is not monitoring, so
+        // counting it would make an unwatched site look covered. It still shows
+        // on the site detail page, labelled Paused.
         return "SELECT client_site_id,
                        COUNT(*)        AS monitor_count,
                        MIN(status)     AS status,
                        MIN(uptime_30d) AS uptime_30d
                 FROM uptime_kuma_monitors
-                WHERE is_stale = 0 AND client_site_id IS NOT NULL
+                WHERE is_stale = 0 AND client_site_id IS NOT NULL AND COALESCE(active, 1) = 1
                 GROUP BY client_site_id";
     }
 

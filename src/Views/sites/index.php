@@ -351,6 +351,29 @@ function tableHeader(bool $ploiConnected, bool $wpmgrConnected, bool $kumaConnec
     </form>
 </div>
 
+<?php if ($kumaCanCreate): ?>
+<!-- Bulk create-monitor bar -->
+<div id="site-bulk-monitor-bar"
+     class="hidden fixed bottom-28 left-0 right-0 lg:left-56 bg-slate-800 text-white px-5 py-3 shadow-lg z-30">
+    <form method="POST" action="/settings/uptime-kuma/monitors/create" id="site-bulk-monitor-form"
+          class="flex flex-wrap items-center gap-3 text-sm">
+        <?= csrfField() ?>
+        <input type="hidden" name="redirect" value="<?= e($_SERVER['REQUEST_URI'] ?? '/sites') ?>">
+        <div id="site-bulk-monitor-ids"></div>
+
+        <span id="site-bulk-monitor-count" class="font-medium">0 sites selected</span>
+
+        <button type="submit"
+                class="px-3 py-1.5 bg-accent-600 hover:bg-accent-700 rounded text-sm font-medium">
+            Create Uptime Kuma monitors
+        </button>
+        <span class="text-slate-400 text-xs">Already-monitored sites are skipped</span>
+        <button type="button" onclick="clearSiteSelection()"
+                class="text-slate-300 hover:text-white text-xs ml-auto">Clear selection</button>
+    </form>
+</div>
+<?php endif ?>
+
 <!-- Bulk archive bar -->
 <div id="site-bulk-archive-bar"
      class="hidden fixed bottom-14 left-0 right-0 lg:left-56 bg-slate-800 text-white px-5 py-3 shadow-lg z-30">
@@ -404,11 +427,21 @@ function updateSiteBulkBar() {
         ids.length + ' site' + (ids.length !== 1 ? 's' : '') + ' selected';
     archiveBar.classList.toggle('hidden', ids.length === 0);
 
+    // Only present when Uptime Kuma is connected with a template chosen.
+    const monitorBar = document.getElementById('site-bulk-monitor-bar');
+    if (monitorBar) {
+        document.getElementById('site-bulk-monitor-count').textContent =
+            ids.length + ' site' + (ids.length !== 1 ? 's' : '') + ' selected';
+        monitorBar.classList.toggle('hidden', ids.length === 0);
+    }
+
     // Rebuild the hidden inputs the forms post.
     const holder = document.getElementById('site-bulk-ids');
     holder.innerHTML = '';
     const archiveHolder = document.getElementById('site-bulk-archive-ids');
     archiveHolder.innerHTML = '';
+    const monitorHolder = document.getElementById('site-bulk-monitor-ids');
+    if (monitorHolder) monitorHolder.innerHTML = '';
     ids.forEach(id => {
         const inp = document.createElement('input');
         inp.type = 'hidden'; inp.name = 'site_ids[]'; inp.value = id;
@@ -417,6 +450,12 @@ function updateSiteBulkBar() {
         const inp2 = document.createElement('input');
         inp2.type = 'hidden'; inp2.name = 'site_ids[]'; inp2.value = id;
         archiveHolder.appendChild(inp2);
+
+        if (monitorHolder) {
+            const inp3 = document.createElement('input');
+            inp3.type = 'hidden'; inp3.name = 'site_ids[]'; inp3.value = id;
+            monitorHolder.appendChild(inp3);
+        }
     });
 
     // Sync each select-all box against its own visible rows.

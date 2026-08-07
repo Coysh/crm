@@ -517,6 +517,15 @@ $router->get('/settings/uptime-kuma', function () use ($db) {
 $router->post('/settings/uptime-kuma', function () use ($db) {
     (new CoyshCRM\Controllers\UptimeKumaController($db))->save();
 });
+$router->post('/settings/uptime-kuma/credentials', function () use ($db) {
+    (new CoyshCRM\Controllers\UptimeKumaController($db))->saveCredentials();
+});
+$router->post('/settings/uptime-kuma/template', function () use ($db) {
+    (new CoyshCRM\Controllers\UptimeKumaController($db))->saveTemplate();
+});
+$router->post('/settings/uptime-kuma/monitors/create', function () use ($db) {
+    (new CoyshCRM\Controllers\UptimeKumaController($db))->createMonitors();
+});
 $router->post('/settings/uptime-kuma/test', function () use ($db) {
     (new CoyshCRM\Controllers\UptimeKumaController($db))->test();
 });

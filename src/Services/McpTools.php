@@ -92,7 +92,7 @@ class McpTools
             ],
             [
                 'name' => 'list_site_uptime',
-                'description' => 'Uptime Kuma monitor state per site: up/down, how long it has been in that state, uptime percentages, response time and TLS certificate days remaining. Uptime percentages are calculated by the CRM from its own sync samples, so they only cover the period since the integration was switched on.',
+                'description' => 'Uptime Kuma monitor state per site: up/down/paused, how long it has been in that state, uptime percentages, response time and TLS certificate days remaining. Uptime normally comes from Uptime Kuma itself; where uptime_is_estimate is true it was calculated by the CRM from its own samples and only covers the period since the integration was switched on.',
                 'inputSchema' => $obj([
                     'client_id' => $id('Restrict to one client'),
                     'status'    => ['type' => 'string', 'enum' => ['all', 'up', 'down'], 'description' => 'Filter by current state (default all)'],
@@ -360,8 +360,12 @@ class McpTools
             'site_domain'         => $m['site_domain'],
             'status'              => $states[(int)$m['status']] ?? 'unknown',
             'in_state_since'      => $m['status_changed_at'],
+            'paused'              => isset($m['active']) ? ((int)$m['active'] === 0) : false,
             'uptime_24h_pct'      => $m['uptime_24h'] !== null ? (float)$m['uptime_24h'] : null,
             'uptime_30d_pct'      => $m['uptime_30d'] !== null ? (float)$m['uptime_30d'] : null,
+            // true = calculated from this CRM's samples, so only covers the
+            // period since the integration was switched on
+            'uptime_is_estimate'  => !empty($m['uptime_is_local']),
             'response_time_ms'    => $m['response_time_ms'] !== null ? (int)$m['response_time_ms'] : null,
             'cert_days_remaining' => $m['cert_days_remaining'] !== null ? (int)$m['cert_days_remaining'] : null,
             'last_checked'        => $m['last_synced_at'],

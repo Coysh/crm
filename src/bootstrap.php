@@ -350,8 +350,14 @@ function healthFlagLabel(string $flag): string
  *
  * @return array{label: string, dot: string, text: string}
  */
-function uptimeStatus(?int $status): array
+function uptimeStatus(?int $status, ?int $active = null): array
 {
+    // A paused monitor is neither up nor down — reporting its last known status
+    // would be stale, and reporting it as down would be wrong.
+    if ($active !== null && $active === 0) {
+        return ['label' => 'Paused', 'dot' => 'bg-slate-400', 'text' => 'text-slate-500'];
+    }
+
     return match($status) {
         1       => ['label' => 'Up',          'dot' => 'bg-green-500',  'text' => 'text-green-600'],
         0       => ['label' => 'Down',        'dot' => 'bg-red-500',    'text' => 'text-red-600'],

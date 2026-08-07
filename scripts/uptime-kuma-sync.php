@@ -35,4 +35,4 @@ if (!empty($results['errors'])) {
     exit(1);
 }
 
-echo '[' . date('Y-m-d H:i:s') . "] Uptime Kuma sync complete — {$results['monitors']} monitor(s).\n";
+echo '[' . date('Y-m-d H:i:s') . "] Uptime Kuma sync complete via {$results['source']} — {$results['monitors']} monitor(s).\n";

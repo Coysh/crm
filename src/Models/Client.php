@@ -722,7 +722,7 @@ class Client extends Model
                          WHERE cs.client_id = ?{$siteActive}
                            AND NOT EXISTS (
                                SELECT 1 FROM uptime_kuma_monitors m
-                               WHERE m.client_site_id = cs.id AND m.is_stale = 0
+                               WHERE m.client_site_id = cs.id AND m.is_stale = 0 AND COALESCE(m.active, 1) = 1
                            ) LIMIT 1",
                         [$clientId]
                     )->fetchColumn();
@@ -822,7 +822,7 @@ class Client extends Model
                     "SELECT DISTINCT cs.client_id
                      FROM client_sites cs
                      JOIN uptime_kuma_monitors m ON m.client_site_id = cs.id
-                     WHERE cs.client_id IS NOT NULL AND m.is_stale = 0 AND m.status = 0" . $siteActive
+                     WHERE cs.client_id IS NOT NULL AND m.is_stale = 0 AND m.status = 0 AND COALESCE(m.active, 1) = 1" . $siteActive
                 )->fetchAll(\PDO::FETCH_COLUMN));
 
                 // An active site with no live monitor pointing at it.
@@ -832,7 +832,7 @@ class Client extends Model
                      WHERE cs.client_id IS NOT NULL{$siteActive}
                        AND NOT EXISTS (
                            SELECT 1 FROM uptime_kuma_monitors m
-                           WHERE m.client_site_id = cs.id AND m.is_stale = 0
+                           WHERE m.client_site_id = cs.id AND m.is_stale = 0 AND COALESCE(m.active, 1) = 1
                        )"
                 )->fetchAll(\PDO::FETCH_COLUMN));
             } catch (\Throwable) {}

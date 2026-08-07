@@ -31,7 +31,9 @@ class SiteController
         $group  = in_array($_GET['group'] ?? '', ['server', 'client']) ? $_GET['group'] : 'all';
         $ploiConnected  = $this->ploi->isConnected();
         $wpmgrConnected = $this->wpmgr->isConnected();
-        $kumaConnected  = (new UptimeKumaService($this->db))->isConnected();
+        $kuma           = new UptimeKumaService($this->db);
+        $kumaConnected  = $kuma->isConnected();
+        $kumaCanCreate  = $kuma->canWrite() && !empty($kuma->getConfig()['template_monitor_id']);
 
         $sites = $this->db->query("
             SELECT cs.*,
@@ -88,7 +90,7 @@ class SiteController
         )->fetchAll(PDO::FETCH_COLUMN);
         $allClients = $this->db->query("SELECT id, name FROM clients WHERE status = 'active' ORDER BY name")->fetchAll();
 
-        render('sites.index', compact('sites', 'grouped', 'group', 'servers', 'stacks', 'allClients', 'ploiConnected', 'wpmgrConnected', 'kumaConnected'), 'Sites');
+        render('sites.index', compact('sites', 'grouped', 'group', 'servers', 'stacks', 'allClients', 'ploiConnected', 'wpmgrConnected', 'kumaConnected', 'kumaCanCreate'), 'Sites');
     }
 
     public function show(int $id): void
@@ -121,8 +123,12 @@ class SiteController
         $kumaChart = $kumaMonitors ? $this->kumaChartData($kumaMonitors) : null;
         $includeCharts = $kumaChart !== null;
 
+        // Offer monitor creation only when it could actually succeed.
+        $kuma          = new UptimeKumaService($this->db);
+        $kumaCanCreate = $kuma->canWrite() && !empty($kuma->getConfig()['template_monitor_id']);
+
         $breadcrumbs = [['Sites', '/sites'], [$site['domain_name'] ?? 'Site #' . $id, null]];
-        render('sites.show', compact('site', 'ploiDetails', 'kumaMonitors', 'kumaChart', 'includeCharts', 'breadcrumbs'), $site['domain_name'] ?? 'Site');
+        render('sites.show', compact('site', 'ploiDetails', 'kumaMonitors', 'kumaChart', 'kumaCanCreate', 'includeCharts', 'breadcrumbs'), $site['domain_name'] ?? 'Site');
     }
 
     public function create(): void

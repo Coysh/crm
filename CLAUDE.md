@@ -130,37 +130,57 @@ All optional — core CRM works without them. Config in per-integration tables (
 - **Cloudflare:** zones/DNS mirrored, matched to `domains` by name.
 - **WPMGR** (read-only, migration 031): WordPress fleet data (version, updates available, backup/uptime/TLS status) from a self-hosted WPMGR instance (`base_url`, e.g. `https://wpmgr.example.com`), mirrored into `wpmgr_sites` by WPMGR's UUID (`wpmgr_id`, TEXT — unlike Ploi's integer `ploi_id`). Auth is `Authorization: Bearer wpmgr_<prefix>_<secret>`; `Services\WpmgrService` is a raw REST client (no SDK exists) modelled on `CloudflareService`'s `file_get_contents()` pattern, not Ploi's SDK wrapper. `Services\WpmgrSync::matchClientSite()` links to `client_sites` by domain match against `domains.domain` — **unlike Ploi, it never auto-creates `client_sites`/`domains` rows for an unmatched site**; an unmatched WPMGR site stays purely informational (`client_site_id` NULL, visible on `/settings/wpmgr`) since it usually already has a Ploi-synced counterpart. The link is re-resolved on every sync rather than locked in once made. Deleted-in-WPMGR sites are flagged `is_stale = 1`, never deleted. WPMGR's own `connection_state` (its internal archived/disconnected states) and this CRM's `client_sites.status` are deliberately orthogonal — neither reads nor writes the other.
 
-- **Uptime Kuma** (read-only, migration 032): per-site up/down, response time and TLS
-  certificate expiry from a self-hosted Uptime Kuma (`base_url`, e.g.
-  `https://uptime.example.com`), mirrored into `uptime_kuma_monitors`.
-  **The API constraint drives the whole design.** Uptime Kuma has no general-purpose
-  authenticated REST API — the monitor list, uptime percentages and heartbeat history all
-  live behind Socket.io, and there is no PHP Socket.io client here. The one authenticated
-  REST surface is `GET /metrics` (Prometheus text; HTTP **Basic** auth with an empty
-  username and the API key as the password — not Bearer like WPMGR/Ploi/Cloudflare).
-  `Services\UptimeKumaService` + `PrometheusParser` + `UptimeKumaSync`.
-  **Name-as-key trap:** `/metrics` carries no monitor id, so `monitor_name` is the sync
-  key. Renaming a monitor in Uptime Kuma reads as "old monitor gone, new one appeared" —
-  the old row goes stale and any manual link on it is lost (re-linkable on
-  `/settings/uptime-kuma`). Compare Ploi's integer `ploi_id` and WPMGR's UUID `wpmgr_id`.
-  **Uptime is computed here, not read.** `/metrics` reports only the current status, so
-  every sync appends a sample to `uptime_kuma_checks` (raw, pruned to 7 days) and folds it
-  into `uptime_kuma_daily` (kept indefinitely); `uptime_24h`/`uptime_30d` on the monitor row
-  are recomputed from those in two grouped statements. Figures therefore reflect the cron
-  cadence and only start accruing once the integration is switched on — hence the
-  `*/5 * * * *` schedule rather than the daily one the other syncs use. Pending (2) and
-  maintenance (3) samples are recorded but excluded from the rollup.
+- **Uptime Kuma** (migrations 032–033): per-site up/down, response time, uptime and TLS
+  certificate expiry from a self-hosted Uptime Kuma (`base_url`), mirrored into
+  `uptime_kuma_monitors`; plus **creating monitors** for CRM sites. The only integration
+  here that writes to a third-party system.
+  **Its API shape drives the whole design.** Uptime Kuma's only REST surface is
+  `GET /metrics` — a Prometheus exporter (HTTP **Basic** auth, empty username, API key as
+  password — not Bearer like WPMGR/Ploi/Cloudflare). It is read-only, carries no monitor
+  id and no uptime percentage. Everything else — the monitor list, uptime, heartbeats, and
+  `add` — is **Socket.IO only**, authenticated with the account username and password; the
+  API key does not work there.
+  `Services\UptimeKumaSocket` is a hand-rolled Socket.IO v4 client over **HTTP
+  long-polling** (the server advertises WebSocket as an optional upgrade, so polling
+  suffices — no new dependency, no extension). Wire notes are in its docblock; the ones
+  that bite are that polling responses pack several packets separated by `0x1e`, and that
+  an Engine.IO `2` PING must be answered with `3` or the session is dropped.
+  **Two sync sources**, chosen by `UptimeKumaService::canWrite()`:
+  Socket.IO when credentials exist (real monitor ids, Uptime Kuma's own uptime, the
+  paused/active flag), otherwise `/metrics` (keyed by name, uptime computed locally).
+  Both paths go through `UptimeKumaSync::upsertMonitor()`, which resolves a row by
+  `kuma_id` and falls back to matching an un-adopted row **by name** — that is what lets
+  the first Socket.IO sync adopt rows the `/metrics` sync created rather than duplicating
+  the fleet. Migration 033 dropped `UNIQUE(monitor_name)` for the same reason, by table
+  rebuild; **that rebuild depends on `scripts/migrate.php` not enabling
+  `PRAGMA foreign_keys`**, or the `ON DELETE CASCADE` from `uptime_kuma_checks` would take
+  the sample history with it.
+  **Event-timing trap:** after login Uptime Kuma pushes `monitorList` first and the
+  per-monitor events (`heartbeatList`, `avgPing`, `certInfo`, `uptime`) afterwards, so the
+  sync waits on **`uptime` at 2× the monitor count** (it fires once per period, 24 and 720
+  **hours**) rather than on `heartbeatList`, which lands too early. Uptime values arrive as
+  a **fraction**, not a percentage.
+  Samples are still written to `uptime_kuma_checks` (pruned to 7 days) and
+  `uptime_kuma_daily` every run — they back the 48-hour response-time chart and act as the
+  uptime fallback, flagged `uptime_is_local`. Paused monitors are skipped for sampling and
+  excluded from `siteRollupSql()`, so a paused monitor never makes a site look covered.
+  **Creating monitors** (`Services\UptimeKumaMonitorFactory`) clones a nominated template
+  monitor, overriding only name and URL, so new sites inherit the fleet's notifications,
+  intervals, retries and accepted status codes. Cloning the server's own object is
+  deliberate: `add` imports fields straight into monitor table columns, so a hand-built
+  object breaks on any column that version lacks (1.21 has no `timeout`, 1.22+ does).
+  `monitorList` also returns computed non-column fields, so the factory strips a known list
+  and then **adaptively strips whatever the server's SQL error names**, mapping the
+  snake_case column back to the camelCase property RedBean derived it from.
   Like WPMGR it never auto-creates `client_sites`/`domains`; matching is by domain via
   `Services\DomainMatcher` (extracted from `WpmgrSync::hostFromUrl()`, which now delegates
-  to it), using `monitor_url` for http-ish types and `monitor_hostname` for
-  `ping`/`port`/`dns`. Unlike WPMGR, a **manual link survives re-syncs**
-  (`link_is_manual = 1`) because monitor names/URLs are freeform and often won't match.
-  Staleness is tolerant: `missed_syncs` must reach 3 before `is_stale = 1`, because a
-  restarted Uptime Kuma serves an empty registry briefly — and a sync that parses zero
-  monitors is refused outright rather than stale-flagging the fleet.
-  A site may have several monitors, so site lists LEFT JOIN
-  `UptimeKumaService::siteRollupSql()` (one row per site, `MIN(status)` so the worst state
-  wins) instead of joining the table directly.
+  to it), using the URL for http-ish types and the hostname for `ping`/`port`/`dns`. A
+  **manual link survives re-syncs** (`link_is_manual = 1`). Staleness is tolerant:
+  `missed_syncs` must reach 3 before `is_stale = 1`, and a sync returning zero monitors is
+  refused outright rather than stale-flagging the fleet.
+  Creation entry points all POST to `/settings/uptime-kuma/monitors/create`: the site
+  detail page, the `/sites` bulk bar, and the unmonitored-sites list on the settings page.
+  Already-monitored domains are skipped, so any of them is safe to re-run.
 
 ## MCP Server (migration 028)
 
@@ -220,4 +240,4 @@ attribute early.
 
 - New browser-form POST endpoints must call `csrfCheck()` and render `csrfField()` in their forms (legacy forms predate this; `/mcp`, `/oauth/token`, `/oauth/register` are correctly CSRF-exempt — no session semantics)
 - Never echo decrypted secrets into HTML (masked placeholder + empty value instead)
-- Next migration number: 033
+- Next migration number: 034

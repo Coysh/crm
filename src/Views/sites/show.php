@@ -188,6 +188,22 @@
     <?php endif ?>
 
     <!-- Uptime Kuma -->
+    <?php if (!$kumaMonitors && $kumaCanCreate && !empty($site['domain_name'])): ?>
+    <div class="bg-white border border-slate-200 rounded-lg px-5 py-4 flex items-center justify-between gap-4">
+        <div>
+            <h2 class="text-sm font-semibold text-slate-700">Uptime Kuma</h2>
+            <p class="text-xs text-slate-500 mt-0.5">This site isn't monitored. Create a monitor using the same notifications and intervals as the rest of the fleet.</p>
+        </div>
+        <form method="POST" action="/settings/uptime-kuma/monitors/create" class="shrink-0">
+            <?= csrfField() ?>
+            <input type="hidden" name="site_ids[]" value="<?= (int)$site['id'] ?>">
+            <input type="hidden" name="redirect" value="/sites/<?= (int)$site['id'] ?>">
+            <button type="submit" onclick="return confirm('Create an Uptime Kuma monitor for <?= e($site['domain_name']) ?>?')"
+                    class="px-3 py-1.5 bg-accent-600 text-white text-sm rounded">Create monitor</button>
+        </form>
+    </div>
+    <?php endif ?>
+
     <?php if ($kumaMonitors): ?>
     <div class="bg-white border border-slate-200 rounded-lg overflow-hidden">
         <div class="px-5 py-3 border-b border-slate-200 bg-slate-50 flex items-center justify-between">
@@ -196,7 +212,10 @@
         </div>
 
         <?php foreach ($kumaMonitors as $mi => $m):
-            $state    = uptimeStatus($m['status'] === null ? null : (int)$m['status']);
+            $state    = uptimeStatus(
+                $m['status'] === null ? null : (int)$m['status'],
+                $m['active'] === null ? null : (int)$m['active']
+            );
             $certDays = $m['cert_days_remaining'] === null ? null : (int)$m['cert_days_remaining'];
             $fields = [
                 'Status'         => '<span class="' . $state['text'] . '">' . $state['label'] . '</span>'
