@@ -57,12 +57,25 @@ class SettingsController
             'last_error'   => $this->lastWpmgrError(),
         ];
 
+        $kuma          = new \CoyshCRM\Services\UptimeKumaService($this->db);
+        $kumaCfg       = $kuma->getConfig();
+        $kumaConnected = $kuma->isConnected();
+        $kumaStats     = ['monitors_total' => 0, 'monitors_linked' => 0, 'monitors_down' => 0, 'last_error' => null];
+        try {
+            $kumaStats = [
+                'monitors_total'  => (int)$this->db->query("SELECT COUNT(*) FROM uptime_kuma_monitors WHERE is_stale = 0")->fetchColumn(),
+                'monitors_linked' => (int)$this->db->query("SELECT COUNT(*) FROM uptime_kuma_monitors WHERE is_stale = 0 AND client_site_id IS NOT NULL")->fetchColumn(),
+                'monitors_down'   => (int)$this->db->query("SELECT COUNT(*) FROM uptime_kuma_monitors WHERE is_stale = 0 AND status = 0")->fetchColumn(),
+                'last_error'      => UptimeKumaController::lastError($this->db),
+            ];
+        } catch (\Throwable) {}
+
         $fxSvc         = new ExchangeRateService($this->db);
         $exchangeRates = $fxSvc->getCurrentRates();
 
         $dataQualityIssues = DataQualityController::issueCount($this->db);
 
-        render('settings.index', compact('faCfg', 'connected', 'ploiCfg', 'ploiConnected', 'ploiStats', 'wpmgrCfg', 'wpmgrConnected', 'wpmgrStats', 'exchangeRates', 'dataQualityIssues'), 'Settings');
+        render('settings.index', compact('faCfg', 'connected', 'ploiCfg', 'ploiConnected', 'ploiStats', 'wpmgrCfg', 'wpmgrConnected', 'wpmgrStats', 'kumaCfg', 'kumaConnected', 'kumaStats', 'exchangeRates', 'dataQualityIssues'), 'Settings');
     }
 
     public function refreshExchangeRates(): void

@@ -8,6 +8,9 @@ class Client extends Model
 {
     protected string $table = 'clients';
 
+    /** Memoised per instance — see uptimeMonitoringActive(). */
+    private ?bool $uptimeActive = null;
+
     public function findAllWithStats(?string $status = null): array
     {
         $mrrSql = FreeAgentRecurringInvoice::monthlySql();
@@ -285,6 +288,32 @@ class Client extends Model
     private function siteStatusFilter(string $alias): string
     {
         return $this->hasSiteStatusColumn() ? " AND COALESCE($alias.status,'active')='active'" : '';
+    }
+
+    /**
+     * Whether uptime health checks should run at all (migration 032 applied AND
+     * Uptime Kuma actually connected).
+     *
+     * Without this gate every client would trip site_unmonitored the moment the
+     * migration lands and before the first sync — a whole dashboard of false
+     * red. "Not monitored" is only meaningful once monitoring exists.
+     */
+    private function uptimeMonitoringActive(): bool
+    {
+        // Instance property, not a `static` local like the schema checks above:
+        // those memoise a fact about the schema, which can't change while the
+        // process runs. This reads a config row the user can change by hitting
+        // Connect/Disconnect, and a `static` would leak one instance's answer
+        // into every later Client in the same process.
+        if ($this->uptimeActive !== null) return $this->uptimeActive;
+        try {
+            $this->query("SELECT id FROM uptime_kuma_monitors LIMIT 0");
+            $key = $this->query("SELECT api_key FROM uptime_kuma_config WHERE id = 1")->fetchColumn();
+            $this->uptimeActive = !empty($key);
+        } catch (\Throwable) {
+            $this->uptimeActive = false;
+        }
+        return $this->uptimeActive;
     }
 
     /** Lazy ExchangeRateService instance. */
@@ -674,6 +703,34 @@ class Client extends Model
             }
         }
 
+        // Uptime — skipped entirely unless Uptime Kuma is connected, so a fresh
+        // install never shows every client as unmonitored.
+        if ($this->uptimeMonitoringActive()) {
+            $siteActive = $this->siteStatusFilter('cs');
+            try {
+                $isDown = (bool)$this->query(
+                    "SELECT 1 FROM client_sites cs
+                     JOIN uptime_kuma_monitors m ON m.client_site_id = cs.id
+                     WHERE cs.client_id = ? AND m.is_stale = 0 AND m.status = 0" . $siteActive . " LIMIT 1",
+                    [$clientId]
+                )->fetchColumn();
+                if ($isDown) $flags[] = 'site_down';
+
+                if ($clientType === 'managed') {
+                    $unmonitored = (bool)$this->query(
+                        "SELECT 1 FROM client_sites cs
+                         WHERE cs.client_id = ?{$siteActive}
+                           AND NOT EXISTS (
+                               SELECT 1 FROM uptime_kuma_monitors m
+                               WHERE m.client_site_id = cs.id AND m.is_stale = 0
+                           ) LIMIT 1",
+                        [$clientId]
+                    )->fetchColumn();
+                    if ($unmonitored) $flags[] = 'site_unmonitored';
+                }
+            } catch (\Throwable) {}
+        }
+
         $count  = count($flags);
         $status = match(true) {
             $count === 0 => 'healthy',
@@ -756,6 +813,31 @@ class Client extends Model
             }
         } catch (\Throwable) {}
 
+        // Aggregate: uptime. Both are no-ops unless Uptime Kuma is connected.
+        $siteDownSet = $unmonitoredSet = [];
+        if ($this->uptimeMonitoringActive()) {
+            $siteActive = $this->siteStatusFilter('cs');
+            try {
+                $siteDownSet = array_flip($this->query(
+                    "SELECT DISTINCT cs.client_id
+                     FROM client_sites cs
+                     JOIN uptime_kuma_monitors m ON m.client_site_id = cs.id
+                     WHERE cs.client_id IS NOT NULL AND m.is_stale = 0 AND m.status = 0" . $siteActive
+                )->fetchAll(\PDO::FETCH_COLUMN));
+
+                // An active site with no live monitor pointing at it.
+                $unmonitoredSet = array_flip($this->query(
+                    "SELECT DISTINCT cs.client_id
+                     FROM client_sites cs
+                     WHERE cs.client_id IS NOT NULL{$siteActive}
+                       AND NOT EXISTS (
+                           SELECT 1 FROM uptime_kuma_monitors m
+                           WHERE m.client_site_id = cs.id AND m.is_stale = 0
+                       )"
+                )->fetchAll(\PDO::FETCH_COLUMN));
+            } catch (\Throwable) {}
+        }
+
         $result = [];
         foreach ($activeClients as $row) {
             $cid        = (int)$row['id'];
@@ -779,6 +861,9 @@ class Client extends Model
             }
             if (isset($renewalOverdueSet[$cid])) $flags[] = 'agreement_renewal_overdue';
             if (isset($hoursExhaustedSet[$cid])) $flags[] = 'hours_exhausted';
+
+            if (isset($siteDownSet[$cid])) $flags[] = 'site_down';
+            if ($clientType === 'managed' && isset($unmonitoredSet[$cid])) $flags[] = 'site_unmonitored';
 
             $count  = count($flags);
             $status = match(true) {
@@ -819,7 +904,14 @@ class Client extends Model
     {
         $client = $this->findById($id); if (!$client) return null;
         $client['domains'] = $this->query("SELECT * FROM domains WHERE client_id = ? ORDER BY domain", [$id])->fetchAll();
-        $client['sites'] = $this->query("SELECT cs.*, d.domain AS domain_name, s.name AS server_name, ps.domain AS ploi_domain, ps.project_type AS ploi_project_type, ps.php_version AS ploi_php_version, ps.repository AS ploi_repository, ps.branch AS ploi_branch, ps.has_ssl AS ploi_has_ssl, ps.web_directory AS ploi_web_directory, ps.test_domain AS ploi_test_domain, ps.status AS ploi_status, ps.is_stale AS ploi_is_stale FROM client_sites cs LEFT JOIN domains d ON d.id = cs.domain_id LEFT JOIN servers s ON s.id = cs.server_id LEFT JOIN ploi_sites ps ON ps.client_site_id = cs.id WHERE cs.client_id = ? ORDER BY d.domain", [$id])->fetchAll();
+        $sitesSelect = "SELECT cs.*, d.domain AS domain_name, s.name AS server_name, ps.domain AS ploi_domain, ps.project_type AS ploi_project_type, ps.php_version AS ploi_php_version, ps.repository AS ploi_repository, ps.branch AS ploi_branch, ps.has_ssl AS ploi_has_ssl, ps.web_directory AS ploi_web_directory, ps.test_domain AS ploi_test_domain, ps.status AS ploi_status, ps.is_stale AS ploi_is_stale";
+        $sitesFrom   = " FROM client_sites cs LEFT JOIN domains d ON d.id = cs.domain_id LEFT JOIN servers s ON s.id = cs.server_id LEFT JOIN ploi_sites ps ON ps.client_site_id = cs.id";
+        $kumaSelect  = $kumaJoin = '';
+        if ($this->uptimeMonitoringActive()) {
+            $kumaSelect = ", uk.monitor_count AS kuma_monitor_count, uk.status AS kuma_status, uk.uptime_30d AS kuma_uptime_30d";
+            $kumaJoin   = " LEFT JOIN (" . \CoyshCRM\Services\UptimeKumaService::siteRollupSql() . ") uk ON uk.client_site_id = cs.id";
+        }
+        $client['sites'] = $this->query($sitesSelect . $kumaSelect . $sitesFrom . $kumaJoin . " WHERE cs.client_id = ? ORDER BY d.domain", [$id])->fetchAll();
         $client['recurring_invoices'] = $this->query("SELECT * FROM freeagent_recurring_invoices WHERE client_id = ? ORDER BY CASE recurring_status WHEN 'Active' THEN 0 ELSE 1 END, reference", [$id])->fetchAll();
         $client['projects'] = $this->query("SELECT * FROM projects WHERE client_id = ? ORDER BY created_at DESC", [$id])->fetchAll();
         $client['expenses'] = $this->query("SELECT e.*, s.name AS server_name, p.name AS project_name FROM expenses e LEFT JOIN servers s ON s.id = e.server_id LEFT JOIN projects p ON p.id = e.project_id WHERE e.client_id = ? ORDER BY e.date DESC", [$id])->fetchAll();

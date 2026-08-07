@@ -22,6 +22,34 @@ function dashDiff(float $a, float $b, bool $lowerIsBetter = false): array
         </div>
     </div>
 
+    <?php if (!empty($sitesDown)): ?>
+    <!-- Sites currently down -->
+    <div class="bg-red-50 border border-red-200 rounded-lg overflow-hidden">
+        <div class="px-5 py-3 border-b border-red-200 flex items-center gap-2">
+            <span class="w-2 h-2 rounded-full bg-red-500"></span>
+            <h2 class="text-sm font-semibold text-red-800">
+                <?= count($sitesDown) === 1 ? '1 site down' : count($sitesDown) . ' sites down' ?>
+            </h2>
+        </div>
+        <ul class="divide-y divide-red-100">
+            <?php foreach ($sitesDown as $down): ?>
+                <li class="px-5 py-2.5 flex flex-wrap items-baseline gap-x-3 gap-y-1 text-sm">
+                    <a href="/sites/<?= (int)$down['site_id'] ?>" class="font-mono text-xs text-red-700 hover:underline">
+                        <?= e($down['domain'] ?: $down['monitor_name']) ?>
+                    </a>
+                    <?php if ($down['client_id']): ?>
+                        <a href="/clients/<?= (int)$down['client_id'] ?>" class="text-slate-600 hover:underline"><?= e($down['client_name']) ?></a>
+                    <?php else: ?>
+                        <span class="text-slate-400 italic text-xs">Unassigned</span>
+                    <?php endif ?>
+                    <span class="text-xs text-slate-500"><?= e($down['monitor_name']) ?></span>
+                    <span class="text-xs text-red-600 ml-auto">down for <?= formatDurationSince($down['status_changed_at']) ?></span>
+                </li>
+            <?php endforeach ?>
+        </ul>
+    </div>
+    <?php endif ?>
+
     <!-- Summary Cards -->
     <div class="grid grid-cols-2 lg:grid-cols-5 gap-4">
         <!-- Monthly Recurring Revenue card — confirmed + pipeline -->

@@ -5,8 +5,11 @@ $qServer   = $_GET['server']     ?? '';
 $qStack    = $_GET['stack']      ?? '';
 $qUnassigned = !empty($_GET['unassigned']);
 
-function siteRow(array $s, array $allClients, bool $ploiConnected, bool $wpmgrConnected): void {
+function siteRow(array $s, array $allClients, bool $ploiConnected, bool $wpmgrConnected, bool $kumaConnected): void {
     $status = $s['status'] ?? 'active';
+    // up | down | unmonitored — drives the Uptime filter (pending/maintenance
+    // count as "up" here; only a real DOWN is worth filtering for).
+    $uptimeFilter = !$s['kuma_monitor_count'] ? 'unmonitored' : ((int)$s['kuma_status'] === 0 ? 'down' : 'up');
     ?>
     <tr class="hover:bg-slate-50 site-row
         <?= !$s['client_id'] ? 'bg-amber-50 hover:bg-amber-100' : '' ?>
@@ -15,7 +18,8 @@ function siteRow(array $s, array $allClients, bool $ploiConnected, bool $wpmgrCo
         data-server="<?= $s['server_id'] ?>"
         data-stack="<?= strtolower(e($s['website_stack'] ?? '')) ?>"
         data-unassigned="<?= $s['client_id'] ? '0' : '1' ?>"
-        data-status="<?= e($status) ?>">
+        data-status="<?= e($status) ?>"
+        data-uptime="<?= $uptimeFilter ?>">
 
         <!-- Bulk select -->
         <td class="px-3 py-2.5 w-8">
@@ -139,6 +143,23 @@ function siteRow(array $s, array $allClients, bool $ploiConnected, bool $wpmgrCo
         </td>
         <?php endif ?>
 
+        <?php if ($kumaConnected): ?>
+        <!-- Uptime Kuma -->
+        <td class="px-4 py-2.5 text-sm">
+            <?php if ($s['kuma_monitor_count']):
+                $kumaState = uptimeStatus($s['kuma_status'] === null ? null : (int)$s['kuma_status']); ?>
+                <span class="flex items-center gap-1" title="<?= (int)$s['kuma_monitor_count'] ?> monitor(s)">
+                    <span class="w-1.5 h-1.5 rounded-full <?= $kumaState['dot'] ?>"></span>
+                    <span class="text-slate-600 text-xs">
+                        <?= $s['kuma_uptime_30d'] !== null ? number_format((float)$s['kuma_uptime_30d'], 1) . '%' : $kumaState['label'] ?>
+                    </span>
+                </span>
+            <?php else: ?>
+                <span class="text-slate-200">—</span>
+            <?php endif ?>
+        </td>
+        <?php endif ?>
+
         <!-- Actions -->
         <td class="px-4 py-2.5 text-right text-xs whitespace-nowrap">
             <a href="/sites/<?= $s['id'] ?>/edit" class="text-slate-400 hover:text-slate-700 mr-2">Edit</a>
@@ -156,7 +177,7 @@ function siteRow(array $s, array $allClients, bool $ploiConnected, bool $wpmgrCo
     </tr>
 <?php }
 
-function tableHeader(bool $ploiConnected, bool $wpmgrConnected): void { ?>
+function tableHeader(bool $ploiConnected, bool $wpmgrConnected, bool $kumaConnected): void { ?>
     <thead class="bg-slate-50 text-xs text-slate-500 uppercase tracking-wide sticky top-0">
         <tr>
             <th class="px-3 py-2.5 w-8">
@@ -173,6 +194,7 @@ function tableHeader(bool $ploiConnected, bool $wpmgrConnected): void { ?>
             <th class="px-4 py-2.5 text-center">CI/CD</th>
             <?php if ($ploiConnected): ?><th class="px-4 py-2.5 text-left">Ploi</th><?php endif ?>
             <?php if ($wpmgrConnected): ?><th class="px-4 py-2.5 text-left">WP</th><?php endif ?>
+            <?php if ($kumaConnected): ?><th class="px-4 py-2.5 text-left">Uptime</th><?php endif ?>
             <th class="px-4 py-2.5"></th>
         </tr>
     </thead>
@@ -240,6 +262,16 @@ function tableHeader(bool $ploiConnected, bool $wpmgrConnected): void { ?>
             <option value="all">All</option>
         </select>
 
+        <?php if ($kumaConnected): ?>
+        <select id="filter-uptime" onchange="applyFilters()"
+                class="border border-slate-300 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-accent-500">
+            <option value="">Any uptime</option>
+            <option value="down">Down now</option>
+            <option value="up">Up</option>
+            <option value="unmonitored">Not monitored</option>
+        </select>
+        <?php endif ?>
+
         <label class="flex items-center gap-2 text-sm text-slate-600 cursor-pointer">
             <input type="checkbox" id="filter-unassigned" onchange="applyFilters()" <?= $qUnassigned ? 'checked' : '' ?>
                    class="rounded border-slate-300 text-accent-600 focus:ring-accent-500">
@@ -255,9 +287,9 @@ function tableHeader(bool $ploiConnected, bool $wpmgrConnected): void { ?>
 
         <?php if ($group === 'all'): ?>
             <table class="w-full text-sm" id="site-table">
-                <?php tableHeader($ploiConnected, $wpmgrConnected) ?>
+                <?php tableHeader($ploiConnected, $wpmgrConnected, $kumaConnected) ?>
                 <tbody class="divide-y divide-slate-100" id="site-tbody">
-                    <?php foreach ($sites as $s): siteRow($s, $allClients, $ploiConnected, $wpmgrConnected); endforeach ?>
+                    <?php foreach ($sites as $s): siteRow($s, $allClients, $ploiConnected, $wpmgrConnected, $kumaConnected); endforeach ?>
                     <tr id="no-results" class="hidden">
                         <td colspan="20" class="px-4 py-8 text-center text-sm text-slate-400">No sites match the current filters.</td>
                     </tr>
@@ -275,9 +307,9 @@ function tableHeader(bool $ploiConnected, bool $wpmgrConnected): void { ?>
                         <span class="text-xs text-slate-400"><?= count($groupSites) ?> site<?= count($groupSites) !== 1 ? 's' : '' ?></span>
                     </div>
                     <table class="w-full text-sm">
-                        <?php tableHeader($ploiConnected, $wpmgrConnected) ?>
+                        <?php tableHeader($ploiConnected, $wpmgrConnected, $kumaConnected) ?>
                         <tbody class="divide-y divide-slate-100">
-                            <?php foreach ($groupSites as $s): siteRow($s, $allClients, $ploiConnected, $wpmgrConnected); endforeach ?>
+                            <?php foreach ($groupSites as $s): siteRow($s, $allClients, $ploiConnected, $wpmgrConnected, $kumaConnected); endforeach ?>
                         </tbody>
                     </table>
                 </div>
@@ -424,6 +456,9 @@ function applyFilters() {
     const stack      = document.getElementById('filter-stack').value;
     const status     = document.getElementById('filter-status').value;
     const unassigned = document.getElementById('filter-unassigned').checked;
+    // Only present when the Uptime Kuma integration is connected.
+    const uptimeEl   = document.getElementById('filter-uptime');
+    const uptime     = uptimeEl ? uptimeEl.value : '';
 
     const rows = document.querySelectorAll('.site-row');
     let visible = 0;
@@ -434,8 +469,9 @@ function applyFilters() {
         const stackMatch   = !stack      || row.dataset.stack === stack;
         const statusMatch  = status === 'all' || row.dataset.status === status;
         const unassMatch   = !unassigned || row.dataset.unassigned === '1';
+        const uptimeMatch  = !uptime     || row.dataset.uptime === uptime;
 
-        const show = domainMatch && serverMatch && stackMatch && statusMatch && unassMatch;
+        const show = domainMatch && serverMatch && stackMatch && statusMatch && unassMatch && uptimeMatch;
         row.style.display = show ? '' : 'none';
         if (show) visible++;
 
@@ -470,6 +506,8 @@ function clearFilters() {
     document.getElementById('filter-stack').value  = '';
     document.getElementById('filter-status').value = 'active';
     document.getElementById('filter-unassigned').checked = false;
+    const uptimeEl = document.getElementById('filter-uptime');
+    if (uptimeEl) uptimeEl.value = '';
     applyFilters();
 }
 

@@ -120,7 +120,7 @@ class McpController
                         : self::PROTOCOL_VERSIONS[0],
                     'capabilities' => ['tools' => new \stdClass()],
                     'serverInfo'   => self::SERVER_INFO,
-                    'instructions' => 'Coysh Digital CRM: query clients, P&L, agreements/SLAs (with remaining support hours), domains, and renewals. Write tools can log SLA work and append client notes.',
+                    'instructions' => 'Coysh Digital CRM: query clients, P&L, agreements/SLAs (with remaining support hours), domains, renewals, and site uptime/TLS monitoring. Write tools can log SLA work and append client notes.',
                 ],
                 'ping'       => new \stdClass(),
                 'tools/list' => ['tools' => $this->tools->list()],

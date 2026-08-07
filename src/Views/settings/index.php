@@ -37,6 +37,20 @@
         </div>
 
         <div class="bg-white border border-slate-200 rounded-lg p-6">
+            <h2 class="text-sm font-semibold text-slate-700">Uptime Kuma Integration</h2>
+            <p class="text-sm text-slate-500 mt-1">Read-only uptime, response time and TLS expiry per site.</p>
+            <p class="text-xs mt-3 <?= $kumaConnected ? 'text-green-700' : 'text-slate-500' ?>"><?= $kumaConnected ? 'Connected' : 'Not connected' ?></p>
+            <a href="/settings/uptime-kuma" class="text-sm text-accent-600 hover:underline mt-3 inline-block">Manage Uptime Kuma →</a>
+
+            <div class="mt-4 text-xs text-slate-600 space-y-1">
+                <p><?= $kumaStats['monitors_linked'] ?> of <?= $kumaStats['monitors_total'] ?> monitors linked to a CRM site</p>
+                <?php if ($kumaStats['monitors_down'] > 0): ?><p class="text-red-600"><?= $kumaStats['monitors_down'] ?> currently down</p><?php endif ?>
+                <?php if (!empty($kumaCfg['last_sync_at'])): ?><p>Last sync: <?= formatDurationSince($kumaCfg['last_sync_at']) ?> ago</p><?php endif ?>
+                <?php if ($kumaStats['last_error']): ?><p class="text-red-600">Last error: <?= e($kumaStats['last_error']['error_message']) ?></p><?php endif ?>
+            </div>
+        </div>
+
+        <div class="bg-white border border-slate-200 rounded-lg p-6">
             <h2 class="text-sm font-semibold text-slate-700">Hiveage Invoice Import</h2>
             <p class="text-sm text-slate-500 mt-1">Import historic invoices from a Hiveage CSV export.</p>
             <a href="/settings/import/hiveage" class="text-sm text-accent-600 hover:underline mt-3 inline-block">Import Hiveage Data →</a>

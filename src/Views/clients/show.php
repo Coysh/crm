@@ -111,6 +111,14 @@ if (isset($db)) {
     if (in_array('hours_exhausted', $health['flags'])) {
         $checks[] = ['hours_exhausted', false, '', 'SLA hours exhausted this period'];
     }
+    // Uptime checks only appear once Uptime Kuma is connected — the flags are
+    // suppressed at source otherwise, so absence here means "not monitoring".
+    if (in_array('site_down', $health['flags'])) {
+        $checks[] = ['site_down', false, '', 'Site currently down'];
+    }
+    if (in_array('site_unmonitored', $health['flags'])) {
+        $checks[] = ['site_unmonitored', false, '', 'Site not covered by uptime monitoring'];
+    }
     ?>
     <div class="bg-white border border-slate-200 rounded-lg overflow-hidden">
         <div class="px-5 py-3 border-b border-slate-200 flex items-center gap-3">
@@ -378,6 +386,19 @@ if (isset($db)) {
                     </details>
                 <?php else: ?>—<?php endif ?>
             </td>
+            <td class="px-4 py-2 text-xs">
+                <?php if (!empty($s['kuma_monitor_count'])):
+                    $kumaState = uptimeStatus($s['kuma_status'] === null ? null : (int)$s['kuma_status']); ?>
+                    <span class="flex items-center gap-1" title="<?= (int)$s['kuma_monitor_count'] ?> monitor(s)">
+                        <span class="w-1.5 h-1.5 rounded-full <?= $kumaState['dot'] ?>"></span>
+                        <span class="text-slate-600">
+                            <?= $s['kuma_uptime_30d'] !== null ? number_format((float)$s['kuma_uptime_30d'], 1) . '%' : $kumaState['label'] ?>
+                        </span>
+                    </span>
+                <?php else: ?>
+                    <span class="text-slate-300">—</span>
+                <?php endif ?>
+            </td>
             <td class="px-4 py-2 text-right whitespace-nowrap">
                 <a href="/clients/<?= $clientId ?>/sites/<?= $s['id'] ?>/edit" class="text-xs text-slate-400 hover:text-slate-700 mr-2">Edit</a>
                 <form method="POST" action="/sites/<?= $s['id'] ?>/archive" class="inline">
@@ -401,6 +422,7 @@ if (isset($db)) {
                 <th class="px-4 py-2 text-left">Server</th>
                 <th class="px-4 py-2 text-center">CI/CD</th>
                 <th class="px-4 py-2 text-left">Ploi</th>
+                <th class="px-4 py-2 text-left">Uptime</th>
                 <th class="px-4 py-2"></th>
             </tr>
         </thead>

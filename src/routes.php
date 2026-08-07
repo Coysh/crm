@@ -510,6 +510,32 @@ $router->post('/settings/wpmgr/sites/(\d+)/fix-domain', function ($id) use ($db)
     (new CoyshCRM\Controllers\SettingsController($db))->fixWpmgrSiteDomain((int)$id);
 });
 
+// ── Uptime Kuma Settings ───────────────────────────────────────────────────
+$router->get('/settings/uptime-kuma', function () use ($db) {
+    (new CoyshCRM\Controllers\UptimeKumaController($db))->index();
+});
+$router->post('/settings/uptime-kuma', function () use ($db) {
+    (new CoyshCRM\Controllers\UptimeKumaController($db))->save();
+});
+$router->post('/settings/uptime-kuma/test', function () use ($db) {
+    (new CoyshCRM\Controllers\UptimeKumaController($db))->test();
+});
+$router->post('/settings/uptime-kuma/sync', function () use ($db) {
+    (new CoyshCRM\Controllers\UptimeKumaController($db))->sync();
+});
+$router->post('/settings/uptime-kuma/disconnect', function () use ($db) {
+    (new CoyshCRM\Controllers\UptimeKumaController($db))->disconnect();
+});
+$router->post('/settings/uptime-kuma/errors/dismiss', function () use ($db) {
+    (new CoyshCRM\Controllers\UptimeKumaController($db))->dismissError();
+});
+$router->post('/settings/uptime-kuma/monitors/(\d+)/link', function ($id) use ($db) {
+    (new CoyshCRM\Controllers\UptimeKumaController($db))->link((int)$id);
+});
+$router->post('/settings/uptime-kuma/monitors/(\d+)/unlink', function ($id) use ($db) {
+    (new CoyshCRM\Controllers\UptimeKumaController($db))->unlink((int)$id);
+});
+
 // ── Cloudflare Settings ────────────────────────────────────────────────────
 $router->get('/settings/cloudflare', function () use ($db) {
     (new CoyshCRM\Controllers\CloudflareController($db))->settings();

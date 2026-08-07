@@ -338,8 +338,48 @@ function healthFlagLabel(string $flag): string
         'no_agreement'              => 'No agreement',
         'agreement_renewal_overdue' => 'Agreement renewal overdue',
         'hours_exhausted'           => 'SLA hours exhausted',
+        'site_down'                 => 'Site down',
+        'site_unmonitored'          => 'Site not monitored',
         default                     => ucfirst(str_replace('_', ' ', $flag)),
     };
+}
+
+/**
+ * Presentation for an Uptime Kuma monitor status code
+ * (0 = down, 1 = up, 2 = pending, 3 = maintenance; null = never reported).
+ *
+ * @return array{label: string, dot: string, text: string}
+ */
+function uptimeStatus(?int $status): array
+{
+    return match($status) {
+        1       => ['label' => 'Up',          'dot' => 'bg-green-500',  'text' => 'text-green-600'],
+        0       => ['label' => 'Down',        'dot' => 'bg-red-500',    'text' => 'text-red-600'],
+        2       => ['label' => 'Pending',     'dot' => 'bg-amber-400',  'text' => 'text-amber-600'],
+        3       => ['label' => 'Maintenance', 'dot' => 'bg-blue-400',   'text' => 'text-blue-600'],
+        default => ['label' => 'Unknown',     'dot' => 'bg-slate-300',  'text' => 'text-slate-500'],
+    };
+}
+
+/**
+ * Coarse "how long ago" for a UTC datetime — "3d 4h", "2h 15m", "just now".
+ * Deliberately coarse: formatDate() is date-granularity only, and uptime needs
+ * to say "down for 2h", not "down on 7 Aug".
+ */
+function formatDurationSince(?string $datetime): string
+{
+    if (!$datetime) return '—';
+
+    $seconds = time() - (int)strtotime($datetime . ' UTC');
+    if ($seconds < 60) return 'just now';
+
+    $days    = intdiv($seconds, 86400);
+    $hours   = intdiv($seconds % 86400, 3600);
+    $minutes = intdiv($seconds % 3600, 60);
+
+    if ($days > 0)  return $hours > 0 ? "{$days}d {$hours}h" : "{$days}d";
+    if ($hours > 0) return $minutes > 0 ? "{$hours}h {$minutes}m" : "{$hours}h";
+    return "{$minutes}m";
 }
 
 /**

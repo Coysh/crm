@@ -9,6 +9,7 @@ use CoyshCRM\Models\ClientSite;
 use CoyshCRM\Models\Domain;
 use CoyshCRM\Models\Server;
 use CoyshCRM\Services\PloiService;
+use CoyshCRM\Services\UptimeKumaService;
 use CoyshCRM\Services\WpmgrService;
 use PDO;
 
@@ -30,6 +31,7 @@ class SiteController
         $group  = in_array($_GET['group'] ?? '', ['server', 'client']) ? $_GET['group'] : 'all';
         $ploiConnected  = $this->ploi->isConnected();
         $wpmgrConnected = $this->wpmgr->isConnected();
+        $kumaConnected  = (new UptimeKumaService($this->db))->isConnected();
 
         $sites = $this->db->query("
             SELECT cs.*,
@@ -44,13 +46,17 @@ class SiteController
                 ws.id                AS wpmgr_site_id,
                 ws.wp_version        AS wpmgr_wp_version,
                 ws.updates_available AS wpmgr_updates_available,
-                ws.health_status     AS wpmgr_health_status
+                ws.health_status     AS wpmgr_health_status,
+                uk.monitor_count     AS kuma_monitor_count,
+                uk.status            AS kuma_status,
+                uk.uptime_30d        AS kuma_uptime_30d
             FROM client_sites cs
             LEFT JOIN domains d   ON d.id  = cs.domain_id
             LEFT JOIN clients c   ON c.id  = cs.client_id
             LEFT JOIN servers s   ON s.id  = cs.server_id
             LEFT JOIN ploi_sites ps ON ps.client_site_id = cs.id
             LEFT JOIN wpmgr_sites ws ON ws.client_site_id = cs.id
+            LEFT JOIN (" . UptimeKumaService::siteRollupSql() . ") uk ON uk.client_site_id = cs.id
             ORDER BY LOWER(COALESCE(d.domain, '')), cs.id
         ")->fetchAll();
 
@@ -82,7 +88,7 @@ class SiteController
         )->fetchAll(PDO::FETCH_COLUMN);
         $allClients = $this->db->query("SELECT id, name FROM clients WHERE status = 'active' ORDER BY name")->fetchAll();
 
-        render('sites.index', compact('sites', 'grouped', 'group', 'servers', 'stacks', 'allClients', 'ploiConnected', 'wpmgrConnected'), 'Sites');
+        render('sites.index', compact('sites', 'grouped', 'group', 'servers', 'stacks', 'allClients', 'ploiConnected', 'wpmgrConnected', 'kumaConnected'), 'Sites');
     }
 
     public function show(int $id): void
@@ -101,8 +107,22 @@ class SiteController
             $ploiDetails = $stmt->fetch() ?: null;
         }
 
+        // A site can carry several monitors, so this is a list rather than more
+        // aliased columns on fetchSiteFull().
+        $kumaMonitors = [];
+        try {
+            $stmt = $this->db->prepare(
+                "SELECT * FROM uptime_kuma_monitors WHERE client_site_id = ? ORDER BY is_stale, LOWER(monitor_name)"
+            );
+            $stmt->execute([$id]);
+            $kumaMonitors = $stmt->fetchAll();
+        } catch (\Throwable) {}
+
+        $kumaChart = $kumaMonitors ? $this->kumaChartData($kumaMonitors) : null;
+        $includeCharts = $kumaChart !== null;
+
         $breadcrumbs = [['Sites', '/sites'], [$site['domain_name'] ?? 'Site #' . $id, null]];
-        render('sites.show', compact('site', 'ploiDetails', 'breadcrumbs'), $site['domain_name'] ?? 'Site');
+        render('sites.show', compact('site', 'ploiDetails', 'kumaMonitors', 'kumaChart', 'includeCharts', 'breadcrumbs'), $site['domain_name'] ?? 'Site');
     }
 
     public function create(): void
@@ -482,6 +502,62 @@ class SiteController
     }
 
     // ── Private helpers ───────────────────────────────────────────────────
+
+    /**
+     * Hourly average response time over the last 48 hours, one series per
+     * monitor. Downsampled from the raw 5-minute samples — 48h of raw points is
+     * ~576 per monitor, far more than the card can usefully draw.
+     *
+     * Returns null when there is nothing to plot yet (uptime history only starts
+     * accruing once the integration is switched on).
+     */
+    private function kumaChartData(array $monitors): ?array
+    {
+        $labels = [];
+        for ($i = 47; $i >= 0; $i--) {
+            $labels[] = gmdate('Y-m-d H:00', time() - $i * 3600);
+        }
+        $index = array_flip($labels);
+
+        $series = [];
+        foreach ($monitors as $monitor) {
+            try {
+                $stmt = $this->db->prepare(
+                    "SELECT strftime('%Y-%m-%d %H:00', checked_at) AS hour,
+                            CAST(AVG(response_time_ms) AS INTEGER)  AS avg_ms
+                     FROM uptime_kuma_checks
+                     WHERE monitor_id = ?
+                       AND checked_at >= datetime('now', '-48 hours')
+                       AND response_time_ms IS NOT NULL
+                     GROUP BY hour"
+                );
+                $stmt->execute([$monitor['id']]);
+                $rows = $stmt->fetchAll();
+            } catch (\Throwable) {
+                continue;
+            }
+
+            if (!$rows) continue;
+
+            // null (not 0) for hours with no sample, so Chart.js breaks the line
+            // instead of drawing a dive to zero.
+            $points = array_fill(0, count($labels), null);
+            foreach ($rows as $row) {
+                if (isset($index[$row['hour']])) {
+                    $points[$index[$row['hour']]] = (int)$row['avg_ms'];
+                }
+            }
+
+            $series[] = ['label' => $monitor['monitor_name'], 'points' => $points];
+        }
+
+        if (!$series) return null;
+
+        return [
+            'labels' => array_map(fn($l) => gmdate('D H:i', strtotime($l . ' UTC')), $labels),
+            'series' => $series,
+        ];
+    }
 
     private function fetchSiteFull(int $id): ?array
     {

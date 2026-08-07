@@ -34,6 +34,7 @@
         $faConnected = false;
         $ploiConnected = false;
         $wpmgrConnected = false;
+        $kumaConnected = false;
         if (isset($db)) {
             try {
                 $faRow = $db->query("SELECT access_token FROM freeagent_config WHERE id = 1")->fetch();
@@ -44,6 +45,10 @@
             try {
                 $wpmgrRow = $db->query("SELECT api_key FROM wpmgr_config WHERE id = 1")->fetch();
                 $wpmgrConnected = !empty($wpmgrRow['api_key']);
+            } catch (\Throwable) {}
+            try {
+                $kumaRow = $db->query("SELECT api_key FROM uptime_kuma_config WHERE id = 1")->fetch();
+                $kumaConnected = !empty($kumaRow['api_key']);
             } catch (\Throwable) {}
         }
 
@@ -102,6 +107,10 @@
             <a href="/settings/wpmgr" class="flex items-center gap-2 text-xs mt-1 <?= $wpmgrConnected ? 'text-green-400' : 'text-slate-500 hover:text-slate-300' ?>">
                 <span class="w-1.5 h-1.5 rounded-full <?= $wpmgrConnected ? 'bg-green-400' : 'bg-slate-600' ?>"></span>
                 <?= $wpmgrConnected ? 'WPMGR connected' : 'WPMGR not connected' ?>
+            </a>
+            <a href="/settings/uptime-kuma" class="flex items-center gap-2 text-xs mt-1 <?= $kumaConnected ? 'text-green-400' : 'text-slate-500 hover:text-slate-300' ?>">
+                <span class="w-1.5 h-1.5 rounded-full <?= $kumaConnected ? 'bg-green-400' : 'bg-slate-600' ?>"></span>
+                <?= $kumaConnected ? 'Uptime Kuma connected' : 'Uptime Kuma not connected' ?>
             </a>
         </div>
 

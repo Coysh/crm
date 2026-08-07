@@ -150,10 +150,30 @@ class DashboardController
             $healthRows[] = array_merge($c, $h);
         }
 
+        // ── Sites currently down ─────────────────────────────────────────
+        // Only monitors linked to a live CRM site; unlinked ones are Uptime
+        // Kuma's business, not the CRM's. Archived sites are excluded.
+        $sitesDown = [];
+        try {
+            if ((new \CoyshCRM\Services\UptimeKumaService($this->db))->isConnected()) {
+                $sitesDown = $this->db->query("
+                    SELECT m.monitor_name, m.monitor_url, m.status_changed_at,
+                           cs.id AS site_id, d.domain AS domain, c.id AS client_id, c.name AS client_name
+                    FROM uptime_kuma_monitors m
+                    JOIN client_sites cs ON cs.id = m.client_site_id
+                    LEFT JOIN domains d  ON d.id  = cs.domain_id
+                    LEFT JOIN clients c  ON c.id  = cs.client_id
+                    WHERE m.is_stale = 0 AND m.status = 0
+                      AND COALESCE(cs.status, 'active') = 'active'
+                    ORDER BY m.status_changed_at
+                ")->fetchAll();
+            }
+        } catch (\Throwable) {}
+
         $includeCharts = true;
 
         render('dashboard.index', compact(
-            'includeCharts',
+            'includeCharts', 'sitesDown',
             'mrr', 'pipelineMrr', 'totalCosts', 'profit', 'activeClientCount', 'serverCount',
             'clientPL',
             'upcomingRenewals', 'totalRenewals',

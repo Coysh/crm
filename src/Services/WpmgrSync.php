@@ -151,28 +151,12 @@ class WpmgrSync
     /** Bare, lowercased, www-stripped host from a WPMGR site URL. */
     public static function hostFromUrl(string $url): string
     {
-        $host = parse_url($url, PHP_URL_HOST) ?: $url;
-        return preg_replace('/^www\./i', '', strtolower(trim($host))) ?? '';
+        return DomainMatcher::hostFromUrl($url);
     }
 
     private function matchClientSite(string $url): ?int
     {
-        $host = self::hostFromUrl($url);
-        if (!$host) return null;
-
-        try {
-            $stmt = $this->db->prepare(
-                "SELECT cs.id FROM client_sites cs
-                 JOIN domains d ON d.id = cs.domain_id
-                 WHERE LOWER(d.domain) = LOWER(?)
-                 LIMIT 1"
-            );
-            $stmt->execute([$host]);
-            $id = $stmt->fetchColumn();
-            return $id ? (int)$id : null;
-        } catch (Throwable) {
-            return null;
-        }
+        return DomainMatcher::findClientSiteByHost($this->db, self::hostFromUrl($url));
     }
 
     private function flagStale(array $seenWpmgrIds): void

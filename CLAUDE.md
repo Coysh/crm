@@ -25,7 +25,9 @@ composer install
 php scripts/ploi-sync.php
 php scripts/freeagent-sync.php
 php scripts/cloudflare-sync.php
+php scripts/wpmgr-sync.php
 php scripts/exchange-rates-sync.php
+php scripts/uptime-kuma-sync.php    # every 5 min — each run is also an uptime sample
 
 # Build Tailwind CSS (dev, with watch)
 npx tailwindcss -i src/css/app.css -o public/css/app.css --watch
@@ -104,7 +106,7 @@ Request flow: `public/index.php` (front controller) → `src/bootstrap.php` (DB 
 - Optional `freeagent_recurring_invoice_id` links the fee to synced revenue
 - PDFs go through `client_attachments` (type `agreement`, optional `agreement_id`)
 
-**Health flags** (`Client::getHealth/getHealthAll`): `loss_making`, `no_retainer`, `no_recent_invoice`, `overdue_invoices`, `incomplete_setup`, `no_agreement` (support/consultancy types only; satisfied by an active agreement OR legacy `agreement_notes`), `agreement_renewal_overdue`, `hours_exhausted`. Labels via `healthFlagLabel()`.
+**Health flags** (`Client::getHealth/getHealthAll`): `loss_making`, `no_retainer`, `no_recent_invoice`, `overdue_invoices`, `incomplete_setup`, `no_agreement` (support/consultancy types only; satisfied by an active agreement OR legacy `agreement_notes`), `agreement_renewal_overdue`, `hours_exhausted`, `site_down`, `site_unmonitored` (managed only). Labels via `healthFlagLabel()`. The last two are gated on `Client::uptimeMonitoringActive()` (migration 032 applied **and** Uptime Kuma connected) — without that gate every client would trip `site_unmonitored` the moment the migration lands.
 
 **Renewals:** `Services\Renewals::fetch($days, $type, $clientId)` unions domains, recurring costs, recurring invoices, and agreement renewal dates — used by the dashboard, `/renewals`, insights, and MCP.
 
@@ -128,9 +130,41 @@ All optional — core CRM works without them. Config in per-integration tables (
 - **Cloudflare:** zones/DNS mirrored, matched to `domains` by name.
 - **WPMGR** (read-only, migration 031): WordPress fleet data (version, updates available, backup/uptime/TLS status) from a self-hosted WPMGR instance (`base_url`, e.g. `https://wpmgr.example.com`), mirrored into `wpmgr_sites` by WPMGR's UUID (`wpmgr_id`, TEXT — unlike Ploi's integer `ploi_id`). Auth is `Authorization: Bearer wpmgr_<prefix>_<secret>`; `Services\WpmgrService` is a raw REST client (no SDK exists) modelled on `CloudflareService`'s `file_get_contents()` pattern, not Ploi's SDK wrapper. `Services\WpmgrSync::matchClientSite()` links to `client_sites` by domain match against `domains.domain` — **unlike Ploi, it never auto-creates `client_sites`/`domains` rows for an unmatched site**; an unmatched WPMGR site stays purely informational (`client_site_id` NULL, visible on `/settings/wpmgr`) since it usually already has a Ploi-synced counterpart. The link is re-resolved on every sync rather than locked in once made. Deleted-in-WPMGR sites are flagged `is_stale = 1`, never deleted. WPMGR's own `connection_state` (its internal archived/disconnected states) and this CRM's `client_sites.status` are deliberately orthogonal — neither reads nor writes the other.
 
+- **Uptime Kuma** (read-only, migration 032): per-site up/down, response time and TLS
+  certificate expiry from a self-hosted Uptime Kuma (`base_url`, e.g.
+  `https://uptime.example.com`), mirrored into `uptime_kuma_monitors`.
+  **The API constraint drives the whole design.** Uptime Kuma has no general-purpose
+  authenticated REST API — the monitor list, uptime percentages and heartbeat history all
+  live behind Socket.io, and there is no PHP Socket.io client here. The one authenticated
+  REST surface is `GET /metrics` (Prometheus text; HTTP **Basic** auth with an empty
+  username and the API key as the password — not Bearer like WPMGR/Ploi/Cloudflare).
+  `Services\UptimeKumaService` + `PrometheusParser` + `UptimeKumaSync`.
+  **Name-as-key trap:** `/metrics` carries no monitor id, so `monitor_name` is the sync
+  key. Renaming a monitor in Uptime Kuma reads as "old monitor gone, new one appeared" —
+  the old row goes stale and any manual link on it is lost (re-linkable on
+  `/settings/uptime-kuma`). Compare Ploi's integer `ploi_id` and WPMGR's UUID `wpmgr_id`.
+  **Uptime is computed here, not read.** `/metrics` reports only the current status, so
+  every sync appends a sample to `uptime_kuma_checks` (raw, pruned to 7 days) and folds it
+  into `uptime_kuma_daily` (kept indefinitely); `uptime_24h`/`uptime_30d` on the monitor row
+  are recomputed from those in two grouped statements. Figures therefore reflect the cron
+  cadence and only start accruing once the integration is switched on — hence the
+  `*/5 * * * *` schedule rather than the daily one the other syncs use. Pending (2) and
+  maintenance (3) samples are recorded but excluded from the rollup.
+  Like WPMGR it never auto-creates `client_sites`/`domains`; matching is by domain via
+  `Services\DomainMatcher` (extracted from `WpmgrSync::hostFromUrl()`, which now delegates
+  to it), using `monitor_url` for http-ish types and `monitor_hostname` for
+  `ping`/`port`/`dns`. Unlike WPMGR, a **manual link survives re-syncs**
+  (`link_is_manual = 1`) because monitor names/URLs are freeform and often won't match.
+  Staleness is tolerant: `missed_syncs` must reach 3 before `is_stale = 1`, because a
+  restarted Uptime Kuma serves an empty registry briefly — and a sync that parses zero
+  monitors is refused outright rather than stale-flagging the fleet.
+  A site may have several monitors, so site lists LEFT JOIN
+  `UptimeKumaService::siteRollupSql()` (one row per site, `MIN(status)` so the worst state
+  wins) instead of joining the table directly.
+
 ## MCP Server (migration 028)
 
-Remote MCP endpoint for Claude web/app custom connectors: `POST /mcp` — Streamable HTTP, POST-only JSON (no SSE), stateless. `McpController` (transport/JSON-RPC) + `Services\McpTools` (tool schemas + dispatch). Read tools: `list_clients`, `get_client`, `get_client_pl`, `list_agreements`, `get_agreement`, `list_agreement_work`, `list_renewals`, `list_domains`, `business_summary`. Write tools (no deletes/edits): `log_agreement_work`, `add_client_note`.
+Remote MCP endpoint for Claude web/app custom connectors: `POST /mcp` — Streamable HTTP, POST-only JSON (no SSE), stateless. `McpController` (transport/JSON-RPC) + `Services\McpTools` (tool schemas + dispatch). Read tools: `list_clients`, `get_client`, `get_client_pl`, `list_agreements`, `get_agreement`, `list_agreement_work`, `list_renewals`, `list_domains`, `list_site_uptime`, `business_summary`. Write tools (no deletes/edits): `log_agreement_work`, `add_client_note`.
 
 Auth is OAuth 2.1 (`OAuthController` + `Services\OAuthService`): discovery at `/.well-known/oauth-authorization-server` and `/.well-known/oauth-protected-resource`, anonymous DCR at `/oauth/register` (https redirect URIs only), consent at `/oauth/authorize`/`/oauth/approve` behind the CRM login+TOTP, `/oauth/token` with mandatory PKCE S256, 1h access + 30d refresh tokens (sha256-hashed at rest), refresh rotation with family-wide revocation on reuse. Unauthenticated `/mcp` returns 401 + `WWW-Authenticate: Bearer resource_metadata=...` (never a redirect). Rate limiting via `mcp_request_log`. Manage/revoke connected apps at `/settings/mcp`.
 
@@ -186,4 +220,4 @@ attribute early.
 
 - New browser-form POST endpoints must call `csrfCheck()` and render `csrfField()` in their forms (legacy forms predate this; `/mcp`, `/oauth/token`, `/oauth/register` are correctly CSRF-exempt — no session semantics)
 - Never echo decrypted secrets into HTML (masked placeholder + empty value instead)
-- Next migration number: 032
+- Next migration number: 033

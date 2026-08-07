@@ -91,6 +91,15 @@ class McpTools
                 ]),
             ],
             [
+                'name' => 'list_site_uptime',
+                'description' => 'Uptime Kuma monitor state per site: up/down, how long it has been in that state, uptime percentages, response time and TLS certificate days remaining. Uptime percentages are calculated by the CRM from its own sync samples, so they only cover the period since the integration was switched on.',
+                'inputSchema' => $obj([
+                    'client_id' => $id('Restrict to one client'),
+                    'status'    => ['type' => 'string', 'enum' => ['all', 'up', 'down'], 'description' => 'Filter by current state (default all)'],
+                    'unlinked'  => ['type' => 'boolean', 'description' => 'Include monitors not linked to a CRM site (default false)'],
+                ]),
+            ],
+            [
                 'name' => 'business_summary',
                 'description' => 'Headline business numbers: MRR, pipeline MRR, monthly costs, profit, client counts, health status counts, and upcoming renewal count.',
                 'inputSchema' => $obj([]),
@@ -131,6 +140,7 @@ class McpTools
             'list_agreement_work' => $this->listAgreementWork($args),
             'list_renewals'       => $this->listRenewals($args),
             'list_domains'        => $this->listDomains($args),
+            'list_site_uptime'    => $this->listSiteUptime($args),
             'business_summary'    => $this->businessSummary(),
             'log_agreement_work'  => $this->logAgreementWork($args),
             'add_client_note'     => $this->addClientNote($args),
@@ -304,6 +314,58 @@ class McpTools
             'annual_cost'   => $d['annual_cost'],
             'client_charge' => $d['client_charge'] ?? null,
         ], $stmt->fetchAll());
+    }
+
+    private function listSiteUptime(array $args): array
+    {
+        // Stale monitors (absent from Uptime Kuma for several syncs — usually
+        // paused or renamed) are never reported; their state is meaningless.
+        $sql = "SELECT m.*, d.domain AS site_domain, c.name AS client_name
+                FROM uptime_kuma_monitors m
+                LEFT JOIN client_sites cs ON cs.id = m.client_site_id
+                LEFT JOIN domains d       ON d.id  = cs.domain_id
+                LEFT JOIN clients c       ON c.id  = cs.client_id
+                WHERE m.is_stale = 0";
+        $params = [];
+
+        if (!empty($args['client_id'])) {
+            $sql .= " AND cs.client_id = ?";
+            $params[] = (int)$args['client_id'];
+        } elseif (empty($args['unlinked'])) {
+            $sql .= " AND m.client_site_id IS NOT NULL";
+        }
+
+        $status = $args['status'] ?? 'all';
+        if ($status === 'down')    $sql .= " AND m.status = 0";
+        elseif ($status === 'up')  $sql .= " AND m.status = 1";
+
+        $sql .= " ORDER BY m.status, LOWER(m.monitor_name) LIMIT 200";
+
+        try {
+            $stmt = $this->db->prepare($sql);
+            $stmt->execute($params);
+            $rows = $stmt->fetchAll();
+        } catch (\Throwable) {
+            return [];
+        }
+
+        $states = [0 => 'down', 1 => 'up', 2 => 'pending', 3 => 'maintenance'];
+
+        return array_map(fn($m) => [
+            'monitor'             => $m['monitor_name'],
+            'type'                => $m['monitor_type'],
+            'target'              => $m['monitor_url'] ?: $m['monitor_hostname'],
+            'client'              => $m['client_name'],
+            'site_id'             => $m['client_site_id'] !== null ? (int)$m['client_site_id'] : null,
+            'site_domain'         => $m['site_domain'],
+            'status'              => $states[(int)$m['status']] ?? 'unknown',
+            'in_state_since'      => $m['status_changed_at'],
+            'uptime_24h_pct'      => $m['uptime_24h'] !== null ? (float)$m['uptime_24h'] : null,
+            'uptime_30d_pct'      => $m['uptime_30d'] !== null ? (float)$m['uptime_30d'] : null,
+            'response_time_ms'    => $m['response_time_ms'] !== null ? (int)$m['response_time_ms'] : null,
+            'cert_days_remaining' => $m['cert_days_remaining'] !== null ? (int)$m['cert_days_remaining'] : null,
+            'last_checked'        => $m['last_synced_at'],
+        ], $rows);
     }
 
     private function businessSummary(): array
