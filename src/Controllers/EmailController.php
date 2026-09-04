@@ -227,8 +227,8 @@ final class EmailController
     public function templateForm(?int $id=null): void
     {
         $template=$id?$this->row('email_templates',$id):['status'=>'active','subject'=>'','preheader'=>'','content_json'=>json_encode($this->blankContent())]; if($id&&!$template){$this->notFound();return;}
-        $assets=$this->db->query('SELECT * FROM email_assets ORDER BY id DESC')->fetchAll(); $includeEmailBuilder=true;
-        render('email.template_form',compact('template','assets','includeEmailBuilder'),$id?'Edit Template':'Add Template');
+        $assets=$this->db->query('SELECT * FROM email_assets ORDER BY id DESC')->fetchAll(); $emailBrand=$this->config(); $includeEmailBuilder=true;
+        render('email.template_form',compact('template','assets','emailBrand','includeEmailBuilder'),$id?'Edit Template':'Add Template');
     }
 
     public function saveTemplate(?int $id=null): void
@@ -248,9 +248,9 @@ final class EmailController
         $campaign=$id?$this->row('email_campaigns',$id):['status'=>'draft','subject'=>'','preheader'=>'','content_json'=>json_encode($this->blankContent()),'tracking_opens'=>(int)($defaults['tracking_opens']??1),'tracking_clicks'=>(int)($defaults['tracking_clicks']??1)]; if($id&&!$campaign){$this->notFound();return;}
         if($id&&$campaign['status']!=='draft'){redirect("/email/campaigns/$id");}
         if(!$id&&!empty($_GET['template'])){$t=$this->row('email_templates',(int)$_GET['template']);if($t)$campaign=array_merge($campaign,['template_id'=>$t['id'],'subject'=>$t['subject'],'preheader'=>$t['preheader'],'content_json'=>$t['content_json']]);}
-        $segments=$this->db->query('SELECT id,name FROM marketing_segments ORDER BY name')->fetchAll(); $templates=$this->db->query("SELECT id,name FROM email_templates WHERE status='active' ORDER BY name")->fetchAll(); $assets=$this->db->query('SELECT * FROM email_assets ORDER BY id DESC')->fetchAll(); $includeEmailBuilder=true;
+        $segments=$this->db->query('SELECT id,name FROM marketing_segments ORDER BY name')->fetchAll(); $templates=$this->db->query("SELECT id,name FROM email_templates WHERE status='active' ORDER BY name")->fetchAll(); $assets=$this->db->query('SELECT * FROM email_assets ORDER BY id DESC')->fetchAll(); $emailBrand=$this->config(); $includeEmailBuilder=true;
         $audiencePreview=null;if(!empty($campaign['segment_id']))try{$audiencePreview=(new SegmentEvaluator($this->db))->audience((int)$campaign['segment_id']);}catch(\Throwable){}
-        render('email.campaign_form',compact('campaign','segments','templates','assets','includeEmailBuilder','audiencePreview'),$id?'Edit Campaign':'Add Campaign');
+        render('email.campaign_form',compact('campaign','segments','templates','assets','emailBrand','includeEmailBuilder','audiencePreview'),$id?'Edit Campaign':'Add Campaign');
     }
 
     public function saveCampaign(?int $id=null): void
@@ -316,7 +316,12 @@ final class EmailController
 
     public function settings(): void
     {
-        $config=Secrets::decryptRow($this->config(),['api_key','webhook_signing_key'])??[];$assets=$this->db->query('SELECT * FROM email_assets ORDER BY id DESC')->fetchAll();render('email.settings',compact('config','assets'),'Email Settings');
+        $config=Secrets::decryptRow($this->config(),['api_key','webhook_signing_key'])??[];
+        if(empty($config['brand_colour'])||$config['brand_colour']==='#4f46e5')$config['brand_colour']='#a1c63e';
+        if(empty($config['logo_url']))$config['logo_url']='/coysh-digital-email-logo.png';
+        if(empty($config['master_html']))$config['master_html']=EmailRenderer::defaultMasterHtml();
+        $assets=$this->db->query('SELECT * FROM email_assets ORDER BY id DESC')->fetchAll();
+        render('email.settings',compact('config','assets'),'Email Settings');
     }
     public function saveSettings(): void
     {
@@ -324,9 +329,14 @@ final class EmailController
         foreach(['from_email','reply_to'] as $field)if(trim($_POST[$field]??'')!==''&&!filter_var(trim($_POST[$field]),FILTER_VALIDATE_EMAIL)){flash('error',ucfirst(str_replace('_',' ',$field)).' is not a valid email address.');redirect('/settings/email');}
         $privacy=trim($_POST['privacy_url']??'');if($privacy!==''&&(!filter_var($privacy,FILTER_VALIDATE_URL)||!in_array(strtolower((string)parse_url($privacy,PHP_URL_SCHEME)),['http','https'],true))){flash('error','Privacy URL must be an HTTP or HTTPS URL.');redirect('/settings/email');}
         $domain=trim($_POST['sending_domain']??'');if($domain!==''&&!preg_match('/^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/i',$domain)){flash('error','Enter a valid Mailgun sending domain.');redirect('/settings/email');}
+        $logo=trim($_POST['logo_url']??'');
+        if($logo!==''&&!str_starts_with($logo,'/')&&(!filter_var($logo,FILTER_VALIDATE_URL)||strtolower((string)parse_url($logo,PHP_URL_SCHEME))!=='https')){flash('error','Logo URL must be root-relative or HTTPS.');redirect('/settings/email');}
+        $master=trim($_POST['master_html']??'');
+        if($master==='')$master=EmailRenderer::defaultMasterHtml();
+        if($masterError=EmailRenderer::masterHtmlError($master)){flash('error',$masterError);redirect('/settings/email');}
         $old=$this->config();$api=trim($_POST['api_key']??'');$sign=trim($_POST['webhook_signing_key']??'');if($api==='')$api=$old['api_key']??'';else$api=Secrets::encrypt($api);if($sign==='')$sign=$old['webhook_signing_key']??'';else$sign=Secrets::encrypt($sign);
-        $this->db->prepare("INSERT INTO email_marketing_config (id,region,api_key,webhook_signing_key,sending_domain,from_name,from_email,reply_to,business_name,business_address,privacy_url,brand_colour,tracking_opens,tracking_clicks,updated_at) VALUES (1,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now')) ON CONFLICT(id) DO UPDATE SET region=excluded.region,api_key=excluded.api_key,webhook_signing_key=excluded.webhook_signing_key,sending_domain=excluded.sending_domain,from_name=excluded.from_name,from_email=excluded.from_email,reply_to=excluded.reply_to,business_name=excluded.business_name,business_address=excluded.business_address,privacy_url=excluded.privacy_url,brand_colour=excluded.brand_colour,tracking_opens=excluded.tracking_opens,tracking_clicks=excluded.tracking_clicks,updated_at=excluded.updated_at")
-            ->execute([($_POST['region']??'')==='us'?'us':'eu',$api,$sign,$domain,trim($_POST['from_name']??''),trim($_POST['from_email']??''),trim($_POST['reply_to']??''),trim($_POST['business_name']??''),trim($_POST['business_address']??''),$privacy,preg_match('/^#[0-9a-f]{6}$/i',$_POST['brand_colour']??'')?$_POST['brand_colour']:'#4f46e5',isset($_POST['tracking_opens'])?1:0,isset($_POST['tracking_clicks'])?1:0]);flash('success','Email settings saved.');redirect('/settings/email');
+        $this->db->prepare("INSERT INTO email_marketing_config (id,region,api_key,webhook_signing_key,sending_domain,from_name,from_email,reply_to,business_name,business_address,privacy_url,brand_colour,logo_url,master_html,tracking_opens,tracking_clicks,updated_at) VALUES (1,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now')) ON CONFLICT(id) DO UPDATE SET region=excluded.region,api_key=excluded.api_key,webhook_signing_key=excluded.webhook_signing_key,sending_domain=excluded.sending_domain,from_name=excluded.from_name,from_email=excluded.from_email,reply_to=excluded.reply_to,business_name=excluded.business_name,business_address=excluded.business_address,privacy_url=excluded.privacy_url,brand_colour=excluded.brand_colour,logo_url=excluded.logo_url,master_html=excluded.master_html,tracking_opens=excluded.tracking_opens,tracking_clicks=excluded.tracking_clicks,updated_at=excluded.updated_at")
+            ->execute([($_POST['region']??'')==='us'?'us':'eu',$api,$sign,$domain,trim($_POST['from_name']??''),trim($_POST['from_email']??''),trim($_POST['reply_to']??''),trim($_POST['business_name']??''),trim($_POST['business_address']??''),$privacy,preg_match('/^#[0-9a-f]{6}$/i',$_POST['brand_colour']??'')?$_POST['brand_colour']:'#a1c63e',$logo,$master,isset($_POST['tracking_opens'])?1:0,isset($_POST['tracking_clicks'])?1:0]);flash('success','Email settings saved.');redirect('/settings/email');
     }
     public function verifySettings(): void { $this->csrf('/settings/email');try{$ok=(new MailgunTransport($this->db))->verify();if($ok)$this->db->exec("UPDATE email_marketing_config SET last_verified_at=datetime('now') WHERE id=1");flash($ok?'success':'error',$ok?'Mailgun domain verified.':'Mailgun verification failed.');}catch(\Throwable $e){flash('error',$e->getMessage());}redirect('/settings/email'); }
     public function configureWebhooks(): void { $this->csrf('/settings/email');try{(new MailgunTransport($this->db))->configureWebhooks(appUrl().'/webhooks/mailgun');flash('success','Mailgun webhooks configured.');}catch(\Throwable $e){flash('error',$e->getMessage());}redirect('/settings/email'); }
@@ -336,7 +346,7 @@ final class EmailController
     }
 
     private function validContent(string $json): string { $data=json_decode($json,true);if(!is_array($data)||!is_array($data['blocks']??null))return json_encode($this->blankContent());return json_encode($data,JSON_UNESCAPED_SLASHES); }
-    private function blankContent(): array { $content=EmailRenderer::blankContent();$config=$this->config();if(preg_match('/^#[0-9a-f]{6}$/i',(string)($config['brand_colour']??'')))$content['theme']['accent']=$config['brand_colour'];return $content; }
+    private function blankContent(): array { $content=EmailRenderer::blankContent();$config=$this->config();$brand=strtolower((string)($config['brand_colour']??''));if($brand!=='#4f46e5'&&preg_match('/^#[0-9a-f]{6}$/i',$brand))$content['theme']['accent']=$brand;return $content; }
     private function csrf(string $back): void { if(!csrfCheck()){flash('error','Invalid form token — please try again.');redirect($back);} }
     private function config(): array { try{return $this->db->query('SELECT * FROM email_marketing_config WHERE id=1')->fetch()?:[];}catch(\Throwable){return [];} }
     private function row(string $table,int $id): ?array { $s=$this->db->prepare("SELECT * FROM $table WHERE id=?");$s->execute([$id]);return $s->fetch()?:null; }

@@ -28,6 +28,7 @@ final class EmailMarketingTest extends TestCase
         $this->db->exec('PRAGMA foreign_keys=ON');
         $this->db->exec("CREATE TABLE users(id INTEGER PRIMARY KEY); CREATE TABLE clients(id INTEGER PRIMARY KEY,name TEXT,status TEXT,contact_name TEXT,contact_email TEXT,client_type TEXT); CREATE TABLE servers(id INTEGER PRIMARY KEY,name TEXT); CREATE TABLE domains(id INTEGER PRIMARY KEY,client_id INTEGER,registrar TEXT); CREATE TABLE client_sites(id INTEGER PRIMARY KEY,client_id INTEGER,status TEXT,website_stack TEXT,css_framework TEXT,smtp_service TEXT,server_id INTEGER); CREATE TABLE cloudflare_zones(id INTEGER PRIMARY KEY,domain_id INTEGER); CREATE TABLE agreements(id INTEGER PRIMARY KEY,client_id INTEGER,agreement_type TEXT,status TEXT,covers_hosting INTEGER,covers_support INTEGER,covers_maintenance INTEGER);");
         $this->db->exec((string)file_get_contents(BASE_PATH.'/migrations/034_email_marketing.sql'));
+        $this->db->exec((string)file_get_contents(BASE_PATH.'/migrations/035_email_brand_master.sql'));
         $this->db->exec("INSERT INTO clients(id,name,status,contact_name,contact_email,client_type) VALUES(1,'Acme','active','Alice','alice@example.com','managed'); INSERT INTO client_sites(id,client_id,status,website_stack) VALUES(1,1,'active','WordPress'); INSERT INTO marketing_contacts(name,email,email_norm,company_name,status,eligibility_basis,eligibility_at) VALUES('Alice','alice@example.com','alice@example.com','Acme','active','consent',datetime('now')); INSERT INTO marketing_contact_clients(contact_id,client_id,is_primary) VALUES(last_insert_rowid(),1,1);");
     }
 
@@ -49,11 +50,28 @@ final class EmailMarketingTest extends TestCase
 
     public function testRendererRemovesUnsafeMarkupAndAddsFooter(): void
     {
-        $content=['theme'=>[],'blocks'=>[['type'=>'text','html'=>'<p onclick="bad()">Hello<script><a href="javascript:bad()">nested</a></script><a href="javascript:bad()">link</a></p>']]];
+        $content=['theme'=>[],'blocks'=>[
+            ['type'=>'text','html'=>'<p onclick="bad()">Hello<script><a href="javascript:bad()">nested</a></script><a href="javascript:bad()">link</a></p>'],
+            ['type'=>'button','text'=>'Read more','url'=>'https://coysh.digital'],
+        ]];
         $rendered=(new EmailRenderer($this->db))->render($content,['name'=>'A & B','company_name'=>'Acme'],'https://crm.test/unsubscribe');
         self::assertStringNotContainsString('onclick', $rendered['html']);
         self::assertStringNotContainsString('javascript:', $rendered['html']);
         self::assertStringContainsString('Unsubscribe from marketing emails', $rendered['html']);
+        self::assertStringContainsString('https://crm.test/coysh-digital-email-logo.png', $rendered['html']);
+        self::assertStringContainsString('#a1c63e', $rendered['html']);
+    }
+
+    public function testMasterHtmlIsEditableButKeepsRequiredRegions(): void
+    {
+        $master=str_replace('<body ', '<body data-master="custom" ', EmailRenderer::defaultMasterHtml());
+        $this->db->prepare('INSERT INTO email_marketing_config(id,business_name,business_address,logo_url,master_html) VALUES(1,?,?,?,?)')
+            ->execute(['Coysh Digital','London','https://assets.example.com/logo.png',$master]);
+        $rendered=(new EmailRenderer($this->db))->render(EmailRenderer::blankContent(),[], 'https://crm.test/unsubscribe');
+        self::assertStringContainsString('data-master="custom"', $rendered['html']);
+        self::assertStringContainsString('https://assets.example.com/logo.png', $rendered['html']);
+        self::assertNull(EmailRenderer::masterHtmlError($master));
+        self::assertSame('Master HTML must contain {{footer}}.',EmailRenderer::masterHtmlError(str_replace('{{footer}}','',$master)));
     }
 
     public function testCampaignSnapshotAndWorker(): void

@@ -183,14 +183,17 @@ All optional — core CRM works without them. Config in per-integration tables (
   detail page, the `/sites` bulk bar, and the unmonitored-sites list on the settings page.
   Already-monitored domains are skipped, so any of them is safe to re-run.
 
-- **Email marketing / Mailgun** (migration 034): contacts are separate from clients and may
+- **Email marketing / Mailgun** (migrations 034–035): contacts are separate from clients and may
   link to multiple clients. Existing client contacts are imported with eligibility `unknown`
   and cannot be sent to until a basis is recorded. Dynamic segments are evaluated live and
   can carry persistent manual inclusion/exclusion overrides; campaign recipients and rendered
   content are frozen when scheduled. `scripts/email-campaigns.php` is the only live-send path
   and must run every minute. Mailgun API/signing keys are encrypted. `/webhooks/mailgun`,
   `/email/unsubscribe/*`, and `/email/assets/*` are public by necessity; webhook HMAC/replay
-  checks and opaque unsubscribe tokens protect the mutating endpoints.
+  checks and opaque unsubscribe tokens protect the mutating endpoints. All emails use the
+  Coysh Digital brand header and palette by default. The shared wrapper is editable through
+  Email Settings as Master HTML, but must retain the `{{logo}}`, `{{content}}`, and `{{footer}}`
+  placeholders.
 
 ## MCP Server (migration 028)
 

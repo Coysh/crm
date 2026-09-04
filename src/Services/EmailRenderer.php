@@ -16,7 +16,7 @@ final class EmailRenderer
     public static function blankContent(): array
     {
         return [
-            'theme' => ['background' => '#f1f5f9', 'body' => '#ffffff', 'text' => '#334155', 'accent' => '#4f46e5', 'font' => 'Arial, sans-serif', 'width' => 600],
+            'theme' => ['background' => '#fdfafa', 'body' => '#ffffff', 'text' => '#264653', 'accent' => '#a1c63e', 'font' => 'Arial, sans-serif', 'width' => 600],
             'blocks' => [
                 ['type' => 'heading', 'text' => 'Your heading', 'level' => 1, 'align' => 'left'],
                 ['type' => 'text', 'html' => '<p>Write your message here.</p>', 'align' => 'left'],
@@ -25,15 +25,52 @@ final class EmailRenderer
         ];
     }
 
+    public static function defaultMasterHtml(): string
+    {
+        return <<<'HTML'
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>@media(max-width:620px){.email-shell{width:100%!important}.email-pad{padding-left:20px!important;padding-right:20px!important}.email-columns td{display:block!important;width:100%!important;box-sizing:border-box}}</style>
+</head>
+<body style="margin:0;padding:0;background:{{background_colour}};font-family:{{font}};color:{{text_colour}};">
+{{preheader}}
+<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background:{{background_colour}};">
+<tr><td align="center" style="padding:28px 12px;">
+<table role="presentation" class="email-shell" width="{{width}}" cellspacing="0" cellpadding="0" border="0" style="width:{{width}}px;max-width:100%;background:{{body_colour}};border-radius:8px;overflow:hidden;">
+{{logo}}
+{{content}}
+{{footer}}
+</table>
+</td></tr>
+</table>
+</body>
+</html>
+HTML;
+    }
+
+    public static function masterHtmlError(string $html): ?string
+    {
+        foreach (['{{logo}}', '{{content}}', '{{footer}}'] as $placeholder) {
+            if (!str_contains($html, $placeholder)) return "Master HTML must contain $placeholder.";
+        }
+        if (preg_match('/<\s*script\b|javascript\s*:|\son[a-z]+\s*=/i', $html)) {
+            return 'Master HTML cannot contain scripts, JavaScript URLs, or inline event handlers.';
+        }
+        return null;
+    }
+
     /** @return array{html:string,text:string} */
     public function render(array|string $content, array $recipient = [], ?string $unsubscribeUrl = null): array
     {
         if (is_string($content)) $content = json_decode($content, true) ?: self::blankContent();
         $theme = array_merge(self::blankContent()['theme'], is_array($content['theme'] ?? null) ? $content['theme'] : []);
-        $accent = $this->colour($theme['accent'] ?? '#4f46e5', '#4f46e5');
-        $background = $this->colour($theme['background'] ?? '#f1f5f9', '#f1f5f9');
+        $accent = $this->colour($theme['accent'] ?? '#a1c63e', '#a1c63e');
+        $background = $this->colour($theme['background'] ?? '#fdfafa', '#fdfafa');
         $body = $this->colour($theme['body'] ?? '#ffffff', '#ffffff');
-        $text = $this->colour($theme['text'] ?? '#334155', '#334155');
+        $text = $this->colour($theme['text'] ?? '#264653', '#264653');
         $width = max(480, min(680, (int)($theme['width'] ?? 600)));
         $fonts = ['Arial, sans-serif', 'Georgia, serif', 'Verdana, sans-serif', 'Tahoma, sans-serif'];
         $font = in_array($theme['font'] ?? '', $fonts, true) ? $theme['font'] : $fonts[0];
@@ -56,20 +93,34 @@ final class EmailRenderer
         $privacy = $this->safeUrl((string)($config['privacy_url'] ?? ''));
         $unsubscribeUrl ??= '#';
         $safeUnsub = htmlspecialchars($unsubscribeUrl, ENT_QUOTES, 'UTF-8');
-        $footer = '<tr><td style="padding:24px 32px;border-top:1px solid #e2e8f0;color:#64748b;font-size:12px;line-height:1.6;text-align:center;">'
+        $footer = '<tr><td style="padding:24px 32px;border-top:1px solid #d5ebf0;color:#526b74;font-size:12px;line-height:1.6;text-align:center;">'
             . $business . ($address !== '' ? '<br>' . $address : '')
-            . '<br><a href="' . $safeUnsub . '" style="color:#475569;text-decoration:underline;">Unsubscribe from marketing emails</a>'
-            . ($privacy ? ' &nbsp;·&nbsp; <a href="' . htmlspecialchars($privacy, ENT_QUOTES, 'UTF-8') . '" style="color:#475569;text-decoration:underline;">Privacy</a>' : '')
+            . '<br><a href="' . $safeUnsub . '" style="color:#264653;text-decoration:underline;">Unsubscribe from marketing emails</a>'
+            . ($privacy ? ' &nbsp;·&nbsp; <a href="' . htmlspecialchars($privacy, ENT_QUOTES, 'UTF-8') . '" style="color:#264653;text-decoration:underline;">Privacy</a>' : '')
             . '</td></tr>';
 
         $preheader = htmlspecialchars((string)($content['preheader'] ?? ''), ENT_QUOTES, 'UTF-8');
-        $html = '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
-            . '<style>@media(max-width:620px){.email-shell{width:100%!important}.email-pad{padding-left:20px!important;padding-right:20px!important}.email-columns td{display:block!important;width:100%!important;box-sizing:border-box}}</style></head>'
-            . '<body style="margin:0;padding:0;background:' . $background . ';font-family:' . htmlspecialchars($font, ENT_QUOTES, 'UTF-8') . ';color:' . $text . ';">'
-            . ($preheader !== '' ? '<div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;">' . $preheader . '</div>' : '')
-            . '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background:' . $background . ';"><tr><td align="center" style="padding:28px 12px;">'
-            . '<table role="presentation" class="email-shell" width="' . $width . '" cellspacing="0" cellpadding="0" border="0" style="width:' . $width . 'px;max-width:100%;background:' . $body . ';border-radius:8px;overflow:hidden;">'
-            . $rows . $footer . '</table></td></tr></table></body></html>';
+        $logoUrl = $this->publicUrl((string)($config['logo_url'] ?? ''));
+        $safeLogoUrl = htmlspecialchars($logoUrl, ENT_QUOTES, 'UTF-8');
+        $logo = '<tr><td style="padding:28px 32px 18px;">'
+            . '<table role="presentation" cellspacing="0" cellpadding="0" border="0"><tr>'
+            . '<td><a href="https://coysh.digital" style="text-decoration:none;"><img src="' . $safeLogoUrl . '" width="52" height="52" alt="Coysh Digital" style="display:block;width:52px;height:52px;border:0;"></a></td>'
+            . '<td style="padding-left:14px;color:#264653;font-family:Arial,sans-serif;font-size:24px;font-weight:bold;line-height:1.1;"><a href="https://coysh.digital" style="color:#264653;text-decoration:none;">Coysh Digital</a></td>'
+            . '</tr></table></td></tr>';
+        $master = trim((string)($config['master_html'] ?? ''));
+        if ($master === '' || self::masterHtmlError($master) !== null) $master = self::defaultMasterHtml();
+        $html = strtr($master, [
+            '{{background_colour}}' => $background,
+            '{{body_colour}}' => $body,
+            '{{text_colour}}' => $text,
+            '{{accent_colour}}' => $accent,
+            '{{font}}' => htmlspecialchars($font, ENT_QUOTES, 'UTF-8'),
+            '{{width}}' => (string)$width,
+            '{{preheader}}' => $preheader !== '' ? '<div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;">' . $preheader . '</div>' : '',
+            '{{logo}}' => $logo,
+            '{{content}}' => $rows,
+            '{{footer}}' => $footer,
+        ]);
 
         $plain[] = html_entity_decode(strip_tags(str_replace('<br>', "\n", $business . ($address ? "\n" . $address : ''))));
         $plain[] = 'Unsubscribe: ' . $unsubscribeUrl;
@@ -96,7 +147,7 @@ final class EmailRenderer
             $url = $this->safeUrl((string)($block['url'] ?? ''));
             if (!$url) return ['', ''];
             $label = htmlspecialchars((string)($block['text'] ?? 'Learn more'), ENT_QUOTES, 'UTF-8');
-            return ['<div style="text-align:' . $align . ';"><a href="' . htmlspecialchars($url, ENT_QUOTES, 'UTF-8') . '" style="display:inline-block;background:' . $accent . ';color:#ffffff;text-decoration:none;font-weight:bold;padding:12px 20px;border-radius:6px;">' . $label . '</a></div>', html_entity_decode($label) . ': ' . $url];
+            return ['<div style="text-align:' . $align . ';"><a href="' . htmlspecialchars($url, ENT_QUOTES, 'UTF-8') . '" style="display:inline-block;background:' . $accent . ';color:' . $this->contrastColour($accent) . ';text-decoration:none;font-weight:bold;padding:12px 20px;border-radius:6px;">' . $label . '</a></div>', html_entity_decode($label) . ': ' . $url];
         }
         if ($type === 'image') {
             $asset = $this->asset((int)($block['asset_id'] ?? 0));
@@ -173,6 +224,24 @@ final class EmailRenderer
     private function colour(string $colour, string $fallback): string
     {
         return preg_match('/^#[0-9a-f]{6}$/i', $colour) ? strtolower($colour) : $fallback;
+    }
+
+    private function contrastColour(string $colour): string
+    {
+        $red = hexdec(substr($colour, 1, 2));
+        $green = hexdec(substr($colour, 3, 2));
+        $blue = hexdec(substr($colour, 5, 2));
+        return (($red * 299 + $green * 587 + $blue * 114) / 1000) > 155 ? '#264653' : '#ffffff';
+    }
+
+    private function publicUrl(string $url): string
+    {
+        $url = trim($url);
+        if ($url === '') return appUrl() . '/coysh-digital-email-logo.png';
+        if (str_starts_with($url, '/')) return appUrl() . $url;
+        return strtolower((string)parse_url($url, PHP_URL_SCHEME)) === 'https' && filter_var($url, FILTER_VALIDATE_URL)
+            ? $url
+            : (appUrl() . '/coysh-digital-email-logo.png');
     }
 
     private function config(): array

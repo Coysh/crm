@@ -106,7 +106,7 @@ final class CampaignDispatcher
 
     public function run(int $limit = 50): array
     {
-        $this->db->exec("INSERT INTO email_marketing_config (id, worker_last_run_at) VALUES (1, datetime('now')) ON CONFLICT(id) DO UPDATE SET worker_last_run_at=datetime('now')");
+        $this->db->exec("INSERT INTO email_marketing_config (id, worker_last_run_at, brand_colour) VALUES (1, datetime('now'), '#a1c63e') ON CONFLICT(id) DO UPDATE SET worker_last_run_at=datetime('now')");
         // A worker may die after claiming a recipient. Never auto-resend that
         // ambiguous delivery: surface it for an explicit operator decision.
         $this->db->exec("UPDATE email_campaign_recipients SET status='unknown',
