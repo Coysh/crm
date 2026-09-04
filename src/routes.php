@@ -22,7 +22,10 @@ $router->before('GET|POST|PUT|PATCH|DELETE|OPTIONS|HEAD', '/.*', function () {
     $isStatic = (bool)preg_match('#^/(css|js|img|favicon|robots)#', $path)
         || (bool)preg_match('#\.(css|js|png|jpe?g|gif|svg|ico|woff2?|map)$#i', $path);
 
-    if (in_array($path, $public, true) || $isStatic || str_starts_with($path, '/.well-known/')) {
+    $isEmailPublic = str_starts_with($path, '/email/unsubscribe/')
+        || str_starts_with($path, '/email/assets/')
+        || $path === '/webhooks/mailgun';
+    if (in_array($path, $public, true) || $isStatic || $isEmailPublic || str_starts_with($path, '/.well-known/')) {
         return;
     }
 
@@ -93,10 +96,67 @@ $router->options('/oauth/.*', function () use ($db) {
     (new CoyshCRM\Controllers\McpController($db))->options();
 });
 
+// ── Email marketing public endpoints ───────────────────────────────────────
+$router->post('/webhooks/mailgun', function () use ($db) {
+    (new CoyshCRM\Controllers\EmailPublicController($db))->webhook();
+});
+$router->get('/email/unsubscribe/(\d+)/([^/]+)', function ($id, $token) use ($db) {
+    (new CoyshCRM\Controllers\EmailPublicController($db))->unsubscribePage((int)$id, rawurldecode($token));
+});
+$router->post('/email/unsubscribe/(\d+)/([^/]+)', function ($id, $token) use ($db) {
+    (new CoyshCRM\Controllers\EmailPublicController($db))->unsubscribe((int)$id, rawurldecode($token));
+});
+$router->get('/email/assets/([a-f0-9]+)/(.*)', function ($token) use ($db) {
+    (new CoyshCRM\Controllers\EmailPublicController($db))->asset($token);
+});
+
 // ── Dashboard ──────────────────────────────────────────────────────────────
 $router->get('/', function () use ($db) {
     (new CoyshCRM\Controllers\DashboardController($db))->index();
 });
+
+// ── Email marketing ────────────────────────────────────────────────────────
+$router->get('/email', function () use ($db) { (new CoyshCRM\Controllers\EmailController($db))->index(); });
+$router->get('/email/contacts', function () use ($db) { (new CoyshCRM\Controllers\EmailController($db))->contacts(); });
+$router->get('/email/contacts/create', function () use ($db) { (new CoyshCRM\Controllers\EmailController($db))->contactForm(); });
+$router->post('/email/contacts', function () use ($db) { (new CoyshCRM\Controllers\EmailController($db))->saveContact(); });
+$router->get('/email/contacts/(\d+)/edit', function ($id) use ($db) { (new CoyshCRM\Controllers\EmailController($db))->contactForm((int)$id); });
+$router->post('/email/contacts/(\d+)', function ($id) use ($db) { (new CoyshCRM\Controllers\EmailController($db))->saveContact((int)$id); });
+$router->post('/email/contacts/(\d+)/suppress', function ($id) use ($db) { (new CoyshCRM\Controllers\EmailController($db))->suppressContact((int)$id); });
+$router->post('/email/contacts/(\d+)/resubscribe', function ($id) use ($db) { (new CoyshCRM\Controllers\EmailController($db))->clearSuppression((int)$id); });
+$router->post('/email/contacts/bulk-eligibility', function () use ($db) { (new CoyshCRM\Controllers\EmailController($db))->bulkEligibility(); });
+$router->post('/email/contacts/csv-preview', function () use ($db) { (new CoyshCRM\Controllers\EmailController($db))->csvPreview(); });
+$router->post('/email/contacts/csv-commit', function () use ($db) { (new CoyshCRM\Controllers\EmailController($db))->csvCommit(); });
+$router->get('/email/contacts/export', function () use ($db) { (new CoyshCRM\Controllers\EmailController($db))->csvExport(); });
+$router->get('/email/segments', function () use ($db) { (new CoyshCRM\Controllers\EmailController($db))->segments(); });
+$router->get('/email/segments/create', function () use ($db) { (new CoyshCRM\Controllers\EmailController($db))->segmentForm(); });
+$router->post('/email/segments', function () use ($db) { (new CoyshCRM\Controllers\EmailController($db))->saveSegment(); });
+$router->get('/email/segments/(\d+)/edit', function ($id) use ($db) { (new CoyshCRM\Controllers\EmailController($db))->segmentForm((int)$id); });
+$router->post('/email/segments/(\d+)', function ($id) use ($db) { (new CoyshCRM\Controllers\EmailController($db))->saveSegment((int)$id); });
+$router->get('/email/templates', function () use ($db) { (new CoyshCRM\Controllers\EmailController($db))->templates(); });
+$router->get('/email/templates/create', function () use ($db) { (new CoyshCRM\Controllers\EmailController($db))->templateForm(); });
+$router->post('/email/templates', function () use ($db) { (new CoyshCRM\Controllers\EmailController($db))->saveTemplate(); });
+$router->get('/email/templates/(\d+)/edit', function ($id) use ($db) { (new CoyshCRM\Controllers\EmailController($db))->templateForm((int)$id); });
+$router->post('/email/templates/(\d+)', function ($id) use ($db) { (new CoyshCRM\Controllers\EmailController($db))->saveTemplate((int)$id); });
+$router->get('/email/campaigns', function () use ($db) { (new CoyshCRM\Controllers\EmailController($db))->campaigns(); });
+$router->get('/email/campaigns/create', function () use ($db) { (new CoyshCRM\Controllers\EmailController($db))->campaignForm(); });
+$router->post('/email/campaigns', function () use ($db) { (new CoyshCRM\Controllers\EmailController($db))->saveCampaign(); });
+$router->get('/email/campaigns/(\d+)', function ($id) use ($db) { (new CoyshCRM\Controllers\EmailController($db))->campaignShow((int)$id); });
+$router->get('/email/campaigns/(\d+)/edit', function ($id) use ($db) { (new CoyshCRM\Controllers\EmailController($db))->campaignForm((int)$id); });
+$router->post('/email/campaigns/(\d+)', function ($id) use ($db) { (new CoyshCRM\Controllers\EmailController($db))->saveCampaign((int)$id); });
+$router->post('/email/campaigns/(\d+)/schedule', function ($id) use ($db) { (new CoyshCRM\Controllers\EmailController($db))->schedule((int)$id); });
+$router->post('/email/campaigns/(\d+)/test', function ($id) use ($db) { (new CoyshCRM\Controllers\EmailController($db))->testCampaign((int)$id); });
+$router->post('/email/campaigns/(\d+)/duplicate', function ($id) use ($db) { (new CoyshCRM\Controllers\EmailController($db))->duplicateCampaign((int)$id); });
+$router->post('/email/campaigns/(\d+)/template', function ($id) use ($db) { (new CoyshCRM\Controllers\EmailController($db))->campaignToTemplate((int)$id); });
+$router->post('/email/campaigns/(\d+)/recipients/(\d+)/retry', function ($id, $recipientId) use ($db) { (new CoyshCRM\Controllers\EmailController($db))->retryRecipient((int)$id, (int)$recipientId); });
+foreach (['draft','pause','resume','cancel'] as $emailAction) {
+    $router->post('/email/campaigns/(\d+)/' . $emailAction, function ($id) use ($db, $emailAction) { (new CoyshCRM\Controllers\EmailController($db))->campaignAction((int)$id, $emailAction); });
+}
+$router->get('/settings/email', function () use ($db) { (new CoyshCRM\Controllers\EmailController($db))->settings(); });
+$router->post('/settings/email', function () use ($db) { (new CoyshCRM\Controllers\EmailController($db))->saveSettings(); });
+$router->post('/settings/email/verify', function () use ($db) { (new CoyshCRM\Controllers\EmailController($db))->verifySettings(); });
+$router->post('/settings/email/webhooks', function () use ($db) { (new CoyshCRM\Controllers\EmailController($db))->configureWebhooks(); });
+$router->post('/settings/email/assets', function () use ($db) { (new CoyshCRM\Controllers\EmailController($db))->uploadAsset(); });
 
 // ── Sites (standalone) ─────────────────────────────────────────────────────
 $router->get('/sites', function () use ($db) {

@@ -3,6 +3,11 @@
 
     <div class="grid md:grid-cols-2 gap-4">
         <div class="bg-white border border-slate-200 rounded-lg p-6">
+            <h2 class="text-sm font-semibold text-slate-700">Email Marketing</h2>
+            <p class="text-sm text-slate-500 mt-1">Configure Mailgun delivery, sender identity, webhooks, and campaign images.</p>
+            <a href="/settings/email" class="text-sm text-accent-600 hover:underline mt-3 inline-block">Manage Email Marketing →</a>
+        </div>
+        <div class="bg-white border border-slate-200 rounded-lg p-6">
             <h2 class="text-sm font-semibold text-slate-700">FreeAgent Integration</h2>
             <p class="text-sm text-slate-500 mt-1">Sync contacts, invoices, and bank transactions.</p>
             <p class="text-xs mt-3 <?= $connected ? 'text-green-700' : 'text-slate-500' ?>"><?= $connected ? 'Connected' : 'Not connected' ?></p>

@@ -5,7 +5,10 @@
     "require": {
         "php": ">=8.2",
         "bramus/router": "^1.6",
-        "ploi/ploi-php-sdk": "^2.0"
+        "ploi/ploi-php-sdk": "^2.0",
+        "mailgun/mailgun-php": "^4.5",
+        "symfony/http-client": "^7.0",
+        "nyholm/psr7": "^1.8"
     },
     "autoload": {
         "psr-4": {
@@ -13,6 +16,15 @@
         }
     },
     "config": {
-        "optimize-autoloader": true
+        "optimize-autoloader": true,
+        "platform": {
+            "php": "8.2.0"
+        }
+    },
+    "scripts": {
+        "test": "phpunit"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^11.5"
     }
 }

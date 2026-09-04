@@ -1,0 +1,5 @@
+<div class="w-full max-w-md bg-white border border-slate-200 rounded-lg p-8 text-center">
+<?php if(!empty($success)): ?><h1 class="text-xl font-semibold text-slate-800">You are unsubscribed</h1><p class="text-sm text-slate-500 mt-3">You will no longer receive marketing emails from us. Essential service messages are unaffected.</p>
+<?php elseif(!empty($valid)): ?><h1 class="text-xl font-semibold text-slate-800">Unsubscribe from marketing?</h1><p class="text-sm text-slate-500 mt-3">This stops all future marketing emails. Essential messages about services you use are unaffected.</p><form method="POST" action="/email/unsubscribe/<?= (int)$recipientId ?>/<?= e(rawurlencode($token)) ?>" class="mt-5"><button class="px-4 py-2 bg-slate-900 text-white rounded text-sm font-medium">Confirm unsubscribe</button></form>
+<?php else: ?><h1 class="text-xl font-semibold text-slate-800">This link is not valid</h1><p class="text-sm text-slate-500 mt-3">The unsubscribe link may be incomplete. Please contact us directly so we can update your preferences.</p><?php endif ?>
+</div>
