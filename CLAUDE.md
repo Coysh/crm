@@ -28,6 +28,7 @@ php scripts/cloudflare-sync.php
 php scripts/wpmgr-sync.php
 php scripts/exchange-rates-sync.php
 php scripts/uptime-kuma-sync.php    # every 5 min — each run is also an uptime sample
+php scripts/email-campaigns.php     # every minute — dispatches scheduled marketing campaigns
 
 # Build Tailwind CSS (dev, with watch)
 npx tailwindcss -i src/css/app.css -o public/css/app.css --watch
@@ -182,6 +183,15 @@ All optional — core CRM works without them. Config in per-integration tables (
   detail page, the `/sites` bulk bar, and the unmonitored-sites list on the settings page.
   Already-monitored domains are skipped, so any of them is safe to re-run.
 
+- **Email marketing / Mailgun** (migration 034): contacts are separate from clients and may
+  link to multiple clients. Existing client contacts are imported with eligibility `unknown`
+  and cannot be sent to until a basis is recorded. Dynamic segments are evaluated live and
+  can carry persistent manual inclusion/exclusion overrides; campaign recipients and rendered
+  content are frozen when scheduled. `scripts/email-campaigns.php` is the only live-send path
+  and must run every minute. Mailgun API/signing keys are encrypted. `/webhooks/mailgun`,
+  `/email/unsubscribe/*`, and `/email/assets/*` are public by necessity; webhook HMAC/replay
+  checks and opaque unsubscribe tokens protect the mutating endpoints.
+
 ## MCP Server (migration 028)
 
 Remote MCP endpoint for Claude web/app custom connectors: `POST /mcp` — Streamable HTTP, POST-only JSON (no SSE), stateless. `McpController` (transport/JSON-RPC) + `Services\McpTools` (tool schemas + dispatch). Read tools: `list_clients`, `get_client`, `get_client_pl`, `list_agreements`, `get_agreement`, `list_agreement_work`, `list_renewals`, `list_domains`, `list_site_uptime`, `business_summary`. Write tools (no deletes/edits): `log_agreement_work`, `add_client_note`.
@@ -192,16 +202,23 @@ Deployment notes: set `APP_URL`; ensure the web server doesn't intercept `/.well
 
 ## Deployment
 
-Production runs straight from a `git pull` — **there is no build step on the server**, and
-Node is not required there. Everything the browser needs is committed:
+Production has no frontend build step, and Node is not required there. Everything the browser needs is committed:
 `public/css/app.css` (compiled Tailwind), `public/js/*.min.js` (vendored Chart.js, Quill,
-qrcode). Build CSS locally and commit the result; see the Tailwind commands above.
+qrcode). PHP dependencies must still be installed after pulling. Build CSS locally and commit
+the result; see the Tailwind commands above.
 
 Deploy script should be exactly:
 
 ```bash
 git pull origin main
+composer install --no-dev --optimize-autoloader
 php scripts/migrate.php     # idempotent — safe on every deploy
+```
+
+Email campaigns also require `APP_URL` to be the public HTTPS CRM URL and this cron entry:
+
+```cron
+* * * * * cd /path/to/coysh-crm && php scripts/email-campaigns.php
 ```
 
 **Do not run `npx tailwindcss` on the server.** Rebuilding `public/css/app.css` there
@@ -240,4 +257,4 @@ attribute early.
 
 - New browser-form POST endpoints must call `csrfCheck()` and render `csrfField()` in their forms (legacy forms predate this; `/mcp`, `/oauth/token`, `/oauth/register` are correctly CSRF-exempt — no session semantics)
 - Never echo decrypted secrets into HTML (masked placeholder + empty value instead)
-- Next migration number: 034
+- Next migration number: 035

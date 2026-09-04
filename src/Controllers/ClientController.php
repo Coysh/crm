@@ -196,6 +196,7 @@ class ClientController
         }
 
         $id = $this->model->insert($data);
+        $this->syncMarketingContact($id, $data);
         flash('success', "Client '{$data['name']}' created.");
         redirect("/clients/$id");
     }
@@ -234,6 +235,7 @@ class ClientController
 
         $data['updated_at'] = date('Y-m-d H:i:s');
         $this->model->update($id, $data);
+        $this->syncMarketingContact($id, $data);
         flash('success', "Client '{$data['name']}' updated.");
         redirect("/clients/$id");
     }
@@ -531,6 +533,15 @@ class ClientController
             $this->db->prepare("UPDATE recurring_cost_clients SET client_id = ? WHERE client_id = ?")
                 ->execute([$targetId, $id]);
 
+            // Preserve marketing contacts linked to the source client.
+            try {
+                $this->db->prepare("INSERT INTO marketing_contact_clients (contact_id,client_id,is_primary)
+                    SELECT contact_id,?,is_primary FROM marketing_contact_clients WHERE client_id=?
+                    ON CONFLICT(contact_id,client_id) DO UPDATE SET is_primary=MAX(is_primary,excluded.is_primary)")
+                    ->execute([$targetId,$id]);
+                $this->db->prepare('DELETE FROM marketing_contact_clients WHERE client_id=?')->execute([$id]);
+            } catch (\Throwable) {}
+
             $this->db->prepare("DELETE FROM clients WHERE id = ?")->execute([$id]);
 
             $this->db->commit();
@@ -629,5 +640,48 @@ class ClientController
             $errors['contact_email'] = 'Invalid email address.';
         }
         return $errors;
+    }
+
+    /** Keep the client's primary marketing contact in step without changing consent/suppression state. */
+    private function syncMarketingContact(int $clientId, array $data): void
+    {
+        try {
+            $email = trim((string)($data['contact_email'] ?? ''));
+            $linked = $this->db->prepare("SELECT mc.* FROM marketing_contacts mc JOIN marketing_contact_clients mcc ON mcc.contact_id=mc.id WHERE mcc.client_id=? AND mcc.is_primary=1 LIMIT 1");
+            $linked->execute([$clientId]);
+            $contact = $linked->fetch();
+            if ($email === '') {
+                $this->db->prepare('DELETE FROM marketing_contact_clients WHERE client_id=? AND is_primary=1')->execute([$clientId]);
+                return;
+            }
+            $norm = strtolower($email);
+            $existing = $this->db->prepare('SELECT * FROM marketing_contacts WHERE email_norm=? LIMIT 1');
+            $existing->execute([$norm]);
+            $byEmail = $existing->fetch();
+            if ($contact && (int)$contact['id'] !== (int)($byEmail['id'] ?? 0)) {
+                $links = $this->db->prepare('SELECT COUNT(*) FROM marketing_contact_clients WHERE contact_id=?');
+                $links->execute([$contact['id']]);
+                if ((int)$links->fetchColumn() === 1 && !$byEmail) {
+                    $this->db->prepare("UPDATE marketing_contacts SET name=?,email=?,email_norm=?,company_name=?,updated_at=datetime('now') WHERE id=?")
+                        ->execute([$data['contact_name'], $email, $norm, $data['name'], $contact['id']]);
+                    return;
+                }
+                $this->db->prepare('DELETE FROM marketing_contact_clients WHERE client_id=? AND is_primary=1')->execute([$clientId]);
+                $contact = null;
+            }
+            $contactId = (int)($byEmail['id'] ?? $contact['id'] ?? 0);
+            if (!$contactId) {
+                $this->db->prepare("INSERT INTO marketing_contacts (name,email,email_norm,company_name,status,eligibility_basis) VALUES (?,?,?,?,'active','unknown')")
+                    ->execute([$data['contact_name'], $email, $norm, $data['name']]);
+                $contactId = (int)$this->db->lastInsertId();
+            } else {
+                $this->db->prepare("UPDATE marketing_contacts SET name=?,company_name=?,updated_at=datetime('now') WHERE id=?")
+                    ->execute([$data['contact_name'], $data['name'], $contactId]);
+            }
+            $this->db->prepare('INSERT INTO marketing_contact_clients (contact_id,client_id,is_primary) VALUES (?,?,1) ON CONFLICT(contact_id,client_id) DO UPDATE SET is_primary=1')
+                ->execute([$contactId, $clientId]);
+        } catch (\Throwable) {
+            // Email marketing migration may not yet be applied during a rolling deploy.
+        }
     }
 }

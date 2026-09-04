@@ -1,11 +1,14 @@
 # Dependencies
 vendor/
 node_modules/
+.phpunit.cache/
 
 # Database — contains all client data and FreeAgent OAuth tokens
 data/*.db
 data/*.db-shm
 data/*.db-wal
+data/*.lock
+data/email-assets/
 
 # Environment / secrets
 .env

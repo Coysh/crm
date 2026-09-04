@@ -488,6 +488,19 @@ class FreeAgentSync
             $this->db->prepare("INSERT INTO clients (name, contact_name, contact_email, status, notes, created_at, updated_at) VALUES (?, ?, ?, 'active', 'Auto-created from FreeAgent sync', datetime('now'), datetime('now'))")
                 ->execute([$baseName, $c['name'] ?? null, $c['email'] ?? null]);
             $clientId = (int)$this->db->lastInsertId();
+            if (!empty($c['email']) && filter_var($c['email'], FILTER_VALIDATE_EMAIL)) {
+                try {
+                    $norm = strtolower(trim((string)$c['email']));
+                    $this->db->prepare("INSERT OR IGNORE INTO marketing_contacts (name,email,email_norm,company_name,status,eligibility_basis) VALUES (?,?,?,?,'active','unknown')")
+                        ->execute([$c['name'] ?? null, trim((string)$c['email']), $norm, $baseName]);
+                    $findMarketing = $this->db->prepare('SELECT id FROM marketing_contacts WHERE email_norm=?');
+                    $findMarketing->execute([$norm]);
+                    $contactId = (int)$findMarketing->fetchColumn();
+                    if ($contactId) $this->db->prepare('INSERT OR IGNORE INTO marketing_contact_clients (contact_id,client_id,is_primary) VALUES (?,?,1)')->execute([$contactId,$clientId]);
+                } catch (\Throwable) {
+                    // Email marketing migration may not yet be applied during deployment.
+                }
+            }
         }
 
         $this->db->prepare("UPDATE freeagent_contacts SET client_id = ?, auto_matched = 1 WHERE id = ?")->execute([$clientId, $c['id']]);
