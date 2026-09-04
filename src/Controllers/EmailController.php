@@ -199,7 +199,9 @@ final class EmailController
         $segment=$id?$this->row('marketing_segments',$id):['segment_type'=>'manual','match_type'=>'all','rules_json'=>'[]']; if($id&&!$segment){$this->notFound();return;}
         $contacts=$this->db->query('SELECT id,name,email FROM marketing_contacts ORDER BY lower(email)')->fetchAll();
         $members=$id?$this->all('SELECT contact_id,action FROM marketing_segment_members WHERE segment_id=?',[$id]):[];
-        render('email.segment_form',compact('segment','contacts','members'),$id?'Edit Segment':'Add Segment');
+        $dynamicCandidates=[];
+        if($id&&($segment['segment_type']??'')==='dynamic')try{$dynamicCandidates=(new SegmentEvaluator($this->db))->candidates($id);}catch(\Throwable){}
+        render('email.segment_form',compact('segment','contacts','members','dynamicCandidates'),$id?'Edit Segment':'Add Segment');
     }
 
     public function saveSegment(?int $id=null): void

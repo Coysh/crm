@@ -29,6 +29,7 @@ final class EmailMarketingTest extends TestCase
         $this->db->exec("CREATE TABLE users(id INTEGER PRIMARY KEY); CREATE TABLE clients(id INTEGER PRIMARY KEY,name TEXT,status TEXT,contact_name TEXT,contact_email TEXT,client_type TEXT); CREATE TABLE servers(id INTEGER PRIMARY KEY,name TEXT); CREATE TABLE domains(id INTEGER PRIMARY KEY,client_id INTEGER,registrar TEXT); CREATE TABLE client_sites(id INTEGER PRIMARY KEY,client_id INTEGER,status TEXT,website_stack TEXT,css_framework TEXT,smtp_service TEXT,server_id INTEGER); CREATE TABLE cloudflare_zones(id INTEGER PRIMARY KEY,domain_id INTEGER); CREATE TABLE agreements(id INTEGER PRIMARY KEY,client_id INTEGER,agreement_type TEXT,status TEXT,covers_hosting INTEGER,covers_support INTEGER,covers_maintenance INTEGER);");
         $this->db->exec((string)file_get_contents(BASE_PATH.'/migrations/034_email_marketing.sql'));
         $this->db->exec((string)file_get_contents(BASE_PATH.'/migrations/035_email_brand_master.sql'));
+        $this->db->exec((string)file_get_contents(BASE_PATH.'/migrations/036_email_coysh_client_update_template.sql'));
         $this->db->exec("INSERT INTO clients(id,name,status,contact_name,contact_email,client_type) VALUES(1,'Acme','active','Alice','alice@example.com','managed'); INSERT INTO client_sites(id,client_id,status,website_stack) VALUES(1,1,'active','WordPress'); INSERT INTO marketing_contacts(name,email,email_norm,company_name,status,eligibility_basis,eligibility_at) VALUES('Alice','alice@example.com','alice@example.com','Acme','active','consent',datetime('now')); INSERT INTO marketing_contact_clients(contact_id,client_id,is_primary) VALUES(last_insert_rowid(),1,1);");
     }
 
@@ -36,6 +37,7 @@ final class EmailMarketingTest extends TestCase
     {
         $service = new SegmentEvaluator($this->db);
         self::assertCount(1, $service->contacts(1));
+        self::assertCount(1, $service->candidates(1));
         self::assertCount(1, $service->audience(1)['included']);
         $contactId=(int)$this->db->query("SELECT id FROM marketing_contacts WHERE email_norm='alice@example.com'")->fetchColumn();
         $this->db->prepare("INSERT INTO marketing_segment_members(segment_id,contact_id,action) VALUES(?,?,'exclude')")->execute([1,$contactId]);
@@ -46,6 +48,17 @@ final class EmailMarketingTest extends TestCase
         $this->db->exec("INSERT INTO marketing_segments(name,segment_type,rules_json) VALUES('Manual','manual','[]')");$manual=(int)$this->db->lastInsertId();
         $this->db->prepare("INSERT INTO marketing_segment_members(segment_id,contact_id,action) VALUES(?,?,'include')")->execute([$manual,$contactId]);
         self::assertSame(['alice@example.com'],array_column($service->contacts($manual),'email'));
+    }
+
+    public function testSeededCoyshTemplateIsDetailedAndReusable(): void
+    {
+        $template=$this->db->query("SELECT * FROM email_templates WHERE name='Coysh Digital Client Update'")->fetch();
+        self::assertNotFalse($template);
+        $content=json_decode($template['content_json'],true);
+        self::assertIsArray($content);
+        self::assertGreaterThanOrEqual(8,count($content['blocks']));
+        self::assertStringContainsString('{{name}}', $template['content_json']);
+        self::assertStringContainsString('https://coysh.digital/contact', $template['content_json']);
     }
 
     public function testRendererRemovesUnsafeMarkupAndAddsFooter(): void

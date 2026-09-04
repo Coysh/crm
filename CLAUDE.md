@@ -183,7 +183,7 @@ All optional — core CRM works without them. Config in per-integration tables (
   detail page, the `/sites` bulk bar, and the unmonitored-sites list on the settings page.
   Already-monitored domains are skipped, so any of them is safe to re-run.
 
-- **Email marketing / Mailgun** (migrations 034–035): contacts are separate from clients and may
+- **Email marketing / Mailgun** (migrations 034–036): contacts are separate from clients and may
   link to multiple clients. Existing client contacts are imported with eligibility `unknown`
   and cannot be sent to until a basis is recorded. Dynamic segments are evaluated live and
   can carry persistent manual inclusion/exclusion overrides; campaign recipients and rendered

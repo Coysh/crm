@@ -71,6 +71,31 @@ final class SegmentEvaluator
         return ['included' => $included, 'excluded' => $excluded];
     }
 
+    /** Return the live rule matches before manual include/exclude overrides. */
+    public function candidates(int $segmentId): array
+    {
+        $stmt = $this->db->prepare('SELECT * FROM marketing_segments WHERE id = ?');
+        $stmt->execute([$segmentId]);
+        $segment = $stmt->fetch();
+        if (!$segment) throw new RuntimeException('Segment not found.');
+        if ($segment['segment_type'] !== 'dynamic') return [];
+        $rules = json_decode((string)$segment['rules_json'], true);
+        if (!is_array($rules)) $rules = [];
+        $parts = [];
+        $params = [];
+        foreach ($rules as $rule) {
+            if (!is_array($rule)) continue;
+            [$sql, $ruleParams] = $this->ruleSql($rule);
+            $parts[] = $sql;
+            array_push($params, ...$ruleParams);
+        }
+        $joiner = $segment['match_type'] === 'any' ? ' OR ' : ' AND ';
+        $where = $parts ? '(' . implode($joiner, $parts) . ')' : '1=1';
+        $stmt = $this->db->prepare("SELECT DISTINCT mc.* FROM marketing_contacts mc WHERE mc.status='active' AND $where ORDER BY lower(mc.email)");
+        $stmt->execute($params);
+        return $stmt->fetchAll();
+    }
+
     private function exclusionReason(array $contact): ?string
     {
         if (!filter_var($contact['email'], FILTER_VALIDATE_EMAIL)) return 'Invalid email address';

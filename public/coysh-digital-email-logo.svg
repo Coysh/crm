@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="180" viewBox="0 0 760 180" role="img" aria-labelledby="title desc">
+  <title id="title">Coysh Digital</title>
+  <desc id="desc">Coysh Digital logo</desc>
+  <g transform="translate(10 10) scale(.46)">
+    <path fill="#a1c63e" fill-rule="evenodd" d="M47.04 33.56h140.37c77.21 0 140.37 63.16 140.37 140.37S264.62 314.3 187.41 314.3H47.04V33.56Zm140.37 190.82c-27.75 0-50.45-22.7-50.45-50.45s22.7-50.45 50.45-50.45c13.88 0 26.48 5.69 35.63 14.82l31.76-31.76c-17.29-17.29-41.14-28.01-67.39-28.01-52.47 0-95.4 42.93-95.4 95.4s42.93 95.42 95.4 95.42c26.25 0 50.1-10.74 67.39-28.03l-31.76-31.76c-9.16 9.13-21.76 14.82-35.63 14.82Z"/>
+  </g>
+  <text x="190" y="116" fill="#264653" font-family="Arial, Helvetica, sans-serif" font-size="72" font-weight="700" letter-spacing="-2">Coysh Digital</text>
+</svg>

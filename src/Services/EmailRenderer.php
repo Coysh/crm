@@ -103,10 +103,7 @@ HTML;
         $logoUrl = $this->publicUrl((string)($config['logo_url'] ?? ''));
         $safeLogoUrl = htmlspecialchars($logoUrl, ENT_QUOTES, 'UTF-8');
         $logo = '<tr><td style="padding:28px 32px 18px;">'
-            . '<table role="presentation" cellspacing="0" cellpadding="0" border="0"><tr>'
-            . '<td><a href="https://coysh.digital" style="text-decoration:none;"><img src="' . $safeLogoUrl . '" width="52" height="52" alt="Coysh Digital" style="display:block;width:52px;height:52px;border:0;"></a></td>'
-            . '<td style="padding-left:14px;color:#264653;font-family:Arial,sans-serif;font-size:24px;font-weight:bold;line-height:1.1;"><a href="https://coysh.digital" style="color:#264653;text-decoration:none;">Coysh Digital</a></td>'
-            . '</tr></table></td></tr>';
+            . '<a href="https://coysh.digital" style="text-decoration:none;"><img src="' . $safeLogoUrl . '" width="380" height="90" alt="Coysh Digital" style="display:block;width:380px;max-width:100%;height:auto;border:0;"></a></td></tr>';
         $master = trim((string)($config['master_html'] ?? ''));
         if ($master === '' || self::masterHtmlError($master) !== null) $master = self::defaultMasterHtml();
         $html = strtr($master, [
