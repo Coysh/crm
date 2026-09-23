@@ -21,19 +21,24 @@ use PDO;
 class JobRunner
 {
     public const JOBS = [
+        // Light, frequent jobs run whenever due.
         'email-campaigns' => ['label' => 'Email campaigns', 'script' => 'email-campaigns.php', 'every' => 60,   'stale' => 900,    'url' => '/email'],
-        'uptime-kuma'     => ['label' => 'Uptime Kuma',     'script' => 'uptime-kuma-sync.php', 'every' => 300,  'stale' => 1800,   'url' => '/settings/uptime-kuma'],
         'notifications'   => ['label' => 'Digest & alerts', 'script' => 'notify.php',           'every' => 300,  'stale' => 3600,   'url' => '/settings#notifications'],
-        'freeagent'       => ['label' => 'FreeAgent',       'script' => 'freeagent-sync.php',   'every' => 3600, 'stale' => 14400,  'url' => '/settings/freeagent'],
-        'ploi'            => ['label' => 'Ploi',            'script' => 'ploi-sync.php',        'every' => 3600, 'stale' => 14400,  'url' => '/settings/ploi'],
-        'wpmgr'           => ['label' => 'WPMGR',           'script' => 'wpmgr-sync.php',       'every' => 3600, 'stale' => 14400,  'url' => '/settings/wpmgr'],
-        'cloudflare'      => ['label' => 'Cloudflare',      'script' => 'cloudflare-sync.php',  'at' => '06:00', 'stale' => 108000, 'url' => '/settings/cloudflare'],
-        'exchange-rates'  => ['label' => 'Exchange rates',  'script' => 'exchange-rates-sync.php', 'at' => '07:00', 'stale' => 108000, 'url' => '/settings'],
-        'backup'          => ['label' => 'Database backup', 'script' => 'backup.php',           'at' => '02:15', 'stale' => 108000, 'url' => '/settings'],
+        // Heavy syncs are `serial`: they queue on one shared lock rather than
+        // writing to SQLite at the same time (concurrent runs hit "database is locked").
+        'uptime-kuma'     => ['label' => 'Uptime Kuma',     'script' => 'uptime-kuma-sync.php', 'every' => 300,  'stale' => 1800,   'url' => '/settings/uptime-kuma', 'serial' => true],
+        'freeagent'       => ['label' => 'FreeAgent',       'script' => 'freeagent-sync.php',   'every' => 3600, 'stale' => 14400,  'url' => '/settings/freeagent',   'serial' => true],
+        'ploi'            => ['label' => 'Ploi',            'script' => 'ploi-sync.php',        'every' => 3600, 'stale' => 14400,  'url' => '/settings/ploi',        'serial' => true],
+        'wpmgr'           => ['label' => 'WPMGR',           'script' => 'wpmgr-sync.php',       'every' => 3600, 'stale' => 14400,  'url' => '/settings/wpmgr',       'serial' => true],
+        'cloudflare'      => ['label' => 'Cloudflare',      'script' => 'cloudflare-sync.php',  'at' => '06:00', 'stale' => 108000, 'url' => '/settings/cloudflare', 'serial' => true],
+        'exchange-rates'  => ['label' => 'Exchange rates',  'script' => 'exchange-rates-sync.php', 'at' => '07:00', 'stale' => 108000, 'url' => '/settings',         'serial' => true],
+        'backup'          => ['label' => 'Database backup', 'script' => 'backup.php',           'at' => '02:15', 'stale' => 108000, 'url' => '/settings',             'serial' => true],
     ];
 
     private const KEEP_DAYS    = 14;
     private const OUTPUT_LIMIT = 4000;
+    /** How long a serial job waits for the one in front before giving up. */
+    private const SERIAL_WAIT  = 1200;
 
     public function __construct(private PDO $db) {}
 
@@ -77,6 +82,27 @@ class JobRunner
         $lock = fopen(DATA_PATH . "/cron-{$name}.lock", 'c');
         if (!$lock || !flock($lock, LOCK_EX | LOCK_NB)) return null;
 
+        // Serial jobs queue behind each other. The run is recorded only once the
+        // queue lock is held, so a waiting job still counts as due and later
+        // dispatches bounce off its own lock instead of piling up.
+        $serial = null;
+        if (!empty($job['serial'])) {
+            $serial   = fopen(DATA_PATH . '/cron-serial.lock', 'c');
+            $deadline = time() + self::SERIAL_WAIT;
+            while (!flock($serial, LOCK_EX | LOCK_NB)) {
+                if (time() >= $deadline) {
+                    fclose($serial);
+                    flock($lock, LOCK_UN);
+                    fclose($lock);
+                    $this->db->prepare(
+                        "INSERT INTO job_runs (job, finished_at, status, exit_code, output) VALUES (?, datetime('now'), 'failed', 75, ?)"
+                    )->execute([$name, 'Gave up after waiting ' . intdiv(self::SERIAL_WAIT, 60) . ' min for another sync to finish']);
+                    return ['status' => 'failed', 'exit_code' => 75, 'output' => 'Timed out waiting for the sync queue'];
+                }
+                sleep(5);
+            }
+        }
+
         try {
             $this->db->prepare("INSERT INTO job_runs (job) VALUES (?)")->execute([$name]);
             $runId = (int)$this->db->lastInsertId();
@@ -108,6 +134,7 @@ class JobRunner
 
             return ['status' => $status, 'exit_code' => $exitCode, 'output' => $output];
         } finally {
+            if ($serial) { flock($serial, LOCK_UN); fclose($serial); }
             flock($lock, LOCK_UN);
             fclose($lock);
         }

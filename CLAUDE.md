@@ -49,7 +49,7 @@ No test suite currently. There are no linting commands configured.
 ## Tech Stack
 
 - **Backend:** PHP 8.2+, no framework — Bramus/Router
-- **Database:** SQLite, stored at `data/crm.db` (gitignored). `PRAGMA foreign_keys = ON`, `busy_timeout = 5000` (web, cron, and MCP can write concurrently).
+- **Database:** SQLite, stored at `data/crm.db` (gitignored). `PRAGMA foreign_keys = ON`, `journal_mode = WAL`, `busy_timeout` 5 s for web / 30 s for CLI (web, cron, and MCP can write concurrently). Under WAL a *deferred* transaction that reads before its first write fails instantly with "database is locked" if another connection commits in between — in long sync transactions, write first (see `UptimeKumaSync`).
 - **Frontend:** Tailwind CSS + vanilla JS (`fetch()` for AJAX, no frameworks). Tailwind
   source is `src/css/app.css`, compiled to `public/css/app.css` — **new utility classes
   don't exist until you rebuild**. `tailwind.config.js` only scans `src/Views/**`, so
@@ -238,7 +238,9 @@ everything** (syncs, campaigns, backup) — `scripts/cron.php` decides what is d
 * * * * * cd /path/to/coysh-crm && php scripts/cron.php >> data/cron.log 2>&1
 ```
 
-Remove any older per-script cron lines when switching, or jobs run twice. Job outcomes land in
+Remove any older per-script cron lines when switching, or jobs run twice. Heavy syncs are marked
+`serial` in `JobRunner::JOBS` and queue on `data/cron-serial.lock` (up to 20 min) so they never write
+at the same time — running them concurrently caused "database is locked" failures. Job outcomes land in
 `job_runs` (pruned to 14 days) and show in the Scheduled Jobs panel on `/settings`; a job is
 **stale** when it hasn't succeeded within its `stale` window. Scripts signal "not configured"
 by printing `[skip]` and exiting 0, and failure by exiting non-zero — keep to that for new
