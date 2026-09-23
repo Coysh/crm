@@ -20,7 +20,7 @@ $db = new PDO('sqlite:' . DATA_PATH . '/crm.db', null, null, [
     PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
 ]);
 $db->exec('PRAGMA foreign_keys = ON');
-$db->exec('PRAGMA busy_timeout = 5000'); // web, cron and MCP write concurrently
+$db->exec('PRAGMA busy_timeout = 30000'); // web, cron and MCP write concurrently
 
 $svc    = new CoyshCRM\Services\ExchangeRateService($db);
 $rates  = $svc->fetchFromApi();

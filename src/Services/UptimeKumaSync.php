@@ -85,6 +85,11 @@ class UptimeKumaSync
 
             $this->db->beginTransaction();
             try {
+                // Take the write lock first. A deferred transaction that reads
+                // before writing fails instantly under WAL (no busy wait) if
+                // another connection commits in between.
+                $this->db->exec("UPDATE uptime_kuma_config SET id = id WHERE id = 1");
+
                 $localIds = [];
                 foreach ($monitors as $monitor) {
                     $localIds[] = $this->upsertMonitor($monitor, $now);

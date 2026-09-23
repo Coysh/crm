@@ -63,9 +63,12 @@ try {
         PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
     ]);
     $db->exec('PRAGMA foreign_keys = ON');
-    // SQLite is single-writer: wait instead of failing when a sync script or
-    // the MCP endpoint holds the write lock.
-    $db->exec('PRAGMA busy_timeout = 5000');
+    // WAL lets readers and the single writer proceed concurrently (web, cron
+    // jobs and MCP all share this file). Persistent once set; cheap to repeat.
+    $db->exec('PRAGMA journal_mode = WAL');
+    // SQLite is single-writer: wait instead of failing when another process
+    // holds the write lock. Cron jobs can afford to wait much longer than a page.
+    $db->exec('PRAGMA busy_timeout = ' . (PHP_SAPI === 'cli' ? 30000 : 5000));
 } catch (PDOException $e) {
     die('Database connection failed: ' . $e->getMessage());
 }
