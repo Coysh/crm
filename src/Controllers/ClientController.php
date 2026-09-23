@@ -35,7 +35,8 @@ class ClientController
         ];
 
         $clients      = $this->model->findAllWithFilters($filter === 'all' ? null : $filter, $filters);
-        $clientHealth = $this->model->getHealthAll();
+        // Pass the grouped P&L so health doesn't fall back to a per-client getPL().
+        $clientHealth = $this->model->getHealthAll($this->model->getPLAll());
 
         // Apply health filter in PHP (uses computed health data)
         if ($filters['health'] !== 'all') {

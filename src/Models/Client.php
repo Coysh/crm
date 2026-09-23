@@ -711,7 +711,7 @@ class Client extends Model
                 $isDown = (bool)$this->query(
                     "SELECT 1 FROM client_sites cs
                      JOIN uptime_kuma_monitors m ON m.client_site_id = cs.id
-                     WHERE cs.client_id = ? AND m.is_stale = 0 AND m.status = 0" . $siteActive . " LIMIT 1",
+                     WHERE cs.client_id = ? AND m.is_stale = 0 AND m.status = 0 AND COALESCE(m.active, 1) = 1" . $siteActive . " LIMIT 1",
                     [$clientId]
                 )->fetchColumn();
                 if ($isDown) $flags[] = 'site_down';

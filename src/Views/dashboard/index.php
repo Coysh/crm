@@ -262,11 +262,9 @@ function dashDiff(float $a, float $b, bool $lowerIsBetter = false): array
                 <li class="px-5 py-3 flex items-center justify-between gap-4 text-sm">
                     <div class="flex items-center gap-2 min-w-0">
                         <span class="inline-block px-1.5 py-0.5 rounded text-xs font-medium shrink-0 <?= $typeBadge ?>"><?= $typeLabel ?></span>
+                        <a href="<?= e($r['detail_url'] ?? ('/clients/' . $r['client_id'])) ?>" class="font-medium text-slate-800 hover:text-accent-600 truncate"><?= e($r['name']) ?></a>
                         <?php if ($r['client_id']): ?>
-                            <a href="/clients/<?= $r['client_id'] ?>" class="font-medium text-slate-800 hover:text-accent-600 truncate"><?= e($r['name']) ?></a>
-                            <span class="text-slate-400 text-xs shrink-0">— <?= e($r['client_name']) ?></span>
-                        <?php else: ?>
-                            <span class="font-medium text-slate-800 truncate"><?= e($r['name']) ?></span>
+                            <a href="/clients/<?= $r['client_id'] ?>" class="text-slate-400 hover:text-accent-600 text-xs shrink-0">— <?= e($r['client_name']) ?></a>
                         <?php endif ?>
                     </div>
                     <div class="text-right shrink-0 flex items-center gap-3">
@@ -338,13 +336,13 @@ function dashDiff(float $a, float $b, bool $lowerIsBetter = false): array
         <div class="px-5 py-3 border-b border-slate-200 flex items-center justify-between">
             <h2 class="text-sm font-semibold text-slate-700">Client Health</h2>
             <div class="flex items-center gap-4 text-xs">
-                <a href="/insights?section=health&amp;health=healthy" class="text-green-600 hover:underline">
+                <a href="/insights?health=healthy#health" class="text-green-600 hover:underline">
                     <?= $healthCounts['healthy'] ?> healthy
                 </a>
-                <a href="/insights?section=health&amp;health=attention" class="text-amber-600 hover:underline">
+                <a href="/insights?health=attention#health" class="text-amber-600 hover:underline">
                     <?= $healthCounts['attention'] ?> attention
                 </a>
-                <a href="/insights?section=health&amp;health=at_risk" class="text-red-600 hover:underline">
+                <a href="/insights?health=at_risk#health" class="text-red-600 hover:underline">
                     <?= $healthCounts['at_risk'] ?> at risk
                 </a>
             </div>

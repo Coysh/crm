@@ -87,7 +87,7 @@
                             <?php endforeach ?>
                         </svg>
                         <?= $item['label'] ?>
-                        <?php if ($path === '/freeagent' || $path === '/settings'): ?>
+                        <?php if ($path === '/freeagent'): ?>
                             <span class="ml-auto w-1.5 h-1.5 rounded-full <?= $faConnected ? 'bg-green-400' : 'bg-slate-600' ?>"></span>
                         <?php endif ?>
                     </a>

@@ -10,6 +10,17 @@ $db = new PDO('sqlite:' . $dbPath, null, null, [
 ]);
 $db->exec('PRAGMA foreign_keys = ON');
 
+// Seeding wipes real tables. Refuse on production or a populated DB unless forced.
+$force = in_array('--force', $argv ?? [], true);
+$isProduction = getenv('APP_ENV') === 'production';
+$hasClients = false;
+try { $hasClients = (int)$db->query('SELECT COUNT(*) FROM clients')->fetchColumn() > 0; } catch (Throwable) {}
+if (!$force && ($isProduction || $hasClients)) {
+    fwrite(STDERR, "Refusing to seed: " . ($isProduction ? 'APP_ENV=production' : 'the clients table already has data')
+        . ". This would DELETE existing records. Re-run with --force if you really mean it.\n");
+    exit(1);
+}
+
 // Wipe existing seed data (FK-safe order)
 foreach ([
     'agreement_work_log', 'agreements',

@@ -612,7 +612,7 @@ if (isset($db)) {
     <section>
         <div class="flex items-center justify-between mb-2">
             <h2 class="text-sm font-semibold text-slate-700">Expenses</h2>
-            <a href="/expenses/create" class="text-xs text-accent-600 hover:underline">+ Add Expense</a>
+            <a href="/expenses/create?client_id=<?= (int)$client['id'] ?>" class="text-xs text-accent-600 hover:underline">+ Add Expense</a>
         </div>
         <?php if ($client['expenses']): ?>
         <div class="bg-white border border-slate-200 rounded-lg overflow-hidden">

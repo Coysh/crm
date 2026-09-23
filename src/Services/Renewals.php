@@ -18,14 +18,15 @@ class Renewals
     public function __construct(private PDO $db) {}
 
     /**
-     * @param int         $days     Horizon in days ahead (30 days of overdue history always included)
+     * @param int         $days     Horizon in days ahead (up to a year of overdue history always included,
+     *                              so a forgotten renewal escalates rather than silently dropping off)
      * @param string      $type     'all' or one of self::TYPES
      * @param int|null    $clientId Restrict to one client (rows without a client are excluded)
      */
     public function fetch(int $days = 90, string $type = 'all', ?int $clientId = null): array
     {
         $today   = date('Y-m-d');
-        $cutoff  = date('Y-m-d', strtotime('-30 days'));
+        $cutoff  = date('Y-m-d', strtotime('-365 days'));
         $horizon = date('Y-m-d', strtotime("+{$days} days"));
 
         $clientFilter = $clientId !== null;
@@ -38,9 +39,11 @@ class Renewals
                        COALESCE(d.client_charge, d.annual_cost) AS amount, 'annual' AS cycle,
                        c.id AS client_id, c.name AS client_name,
                        NULL AS shared_with,
-                       '/clients/' || c.id AS detail_url
+                       '/domains/' || d.id AS detail_url
                 FROM domains d LEFT JOIN clients c ON c.id = d.client_id
                 WHERE d.renewal_date IS NOT NULL
+                  AND COALESCE(d.status, 'active') != 'archived'
+                  AND COALESCE(c.status, 'active') != 'archived'
                   AND d.renewal_date BETWEEN ? AND ?"
                 . ($clientFilter ? ' AND d.client_id = ?' : '');
             array_push($params, $cutoff, $horizon);
@@ -72,6 +75,7 @@ class Renewals
                 FROM freeagent_recurring_invoices fri
                 LEFT JOIN clients c ON c.id = fri.client_id
                 WHERE fri.next_recurs_on IS NOT NULL AND fri.recurring_status = 'Active'
+                  AND COALESCE(c.status, 'active') != 'archived'
                   AND fri.next_recurs_on BETWEEN ? AND ?"
                 . ($clientFilter ? ' AND fri.client_id = ?' : '');
             array_push($params, $cutoff, $horizon);
@@ -88,6 +92,7 @@ class Renewals
                        '/clients/' || c.id AS detail_url
                 FROM agreements a JOIN clients c ON c.id = a.client_id
                 WHERE a.status = 'active' AND a.renewal_date IS NOT NULL
+                  AND c.status != 'archived'
                   AND a.renewal_date BETWEEN ? AND ?"
                 . ($clientFilter ? ' AND a.client_id = ?' : '');
             array_push($params, $cutoff, $horizon);

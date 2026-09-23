@@ -15,8 +15,11 @@ php -S localhost:8080 -t public/
 # Run database migrations
 php scripts/migrate.php
 
-# Seed sample data
+# Seed sample data (refuses on production or a populated DB unless --force)
 php scripts/seed.php
+
+# Snapshot DB + app.key into data/backups/ (VACUUM INTO, keeps 14)
+php scripts/backup.php
 
 # Install PHP dependencies
 composer install
@@ -78,7 +81,7 @@ Request flow: `public/index.php` (front controller) → `src/bootstrap.php` (DB 
 - Controllers handle HTTP requests and delegate to models; no base controller class
 - Models extend `Models\Model` (raw PDO, no ORM)
 - Views are plain PHP templates; `src/Views/layouts/main.php` wraps app pages, `layouts/auth.php` wraps login/consent pages
-- Migrations are numbered SQL files in `migrations/` (currently 001–031) run in order by `scripts/migrate.php`, tracked in `_migrations`
+- Migrations are numbered SQL files in `migrations/` (currently 001–036) run in order by `scripts/migrate.php`, tracked in `_migrations`
 - Shared helpers live in `src/bootstrap.php`: `render()`, `redirect()`, `flash()`, `csrfToken/csrfField/csrfCheck()`, `e()`, `money()`, `formatCurrency()`, `formatDate()`, `statusBadge()`, `healthFlagLabel()`, `appUrl()`
 - Column feature-detection via `try { SELECT col LIMIT 0 } catch` is used to tolerate partially-migrated DBs — follow the same pattern for new columns
 
@@ -260,4 +263,4 @@ attribute early.
 
 - New browser-form POST endpoints must call `csrfCheck()` and render `csrfField()` in their forms (legacy forms predate this; `/mcp`, `/oauth/token`, `/oauth/register` are correctly CSRF-exempt — no session semantics)
 - Never echo decrypted secrets into HTML (masked placeholder + empty value instead)
-- Next migration number: 035
+- Next migration number: 037
