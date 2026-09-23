@@ -298,7 +298,7 @@ class Client extends Model
      * migration lands and before the first sync — a whole dashboard of false
      * red. "Not monitored" is only meaningful once monitoring exists.
      */
-    private function uptimeMonitoringActive(): bool
+    public function uptimeMonitoringActive(): bool
     {
         // Instance property, not a `static` local like the schema checks above:
         // those memoise a fact about the schema, which can't change while the

@@ -74,6 +74,7 @@ if (isset($db)) {
     </div>
 
     <!-- Client Health Card -->
+    <div id="health" class="scroll-mt-4"></div>
     <?php
     $healthStatusBadge = match($health['status']) {
         'healthy'   => 'bg-green-100 text-green-700',
@@ -139,6 +140,7 @@ if (isset($db)) {
     </div>
 
     <!-- Agreements & SLAs -->
+    <div id="agreements" class="scroll-mt-4"></div>
     <?php
     $agreements = $client['agreements'] ?? [];
     include VIEW_PATH . '/clients/_agreements.php';
@@ -203,7 +205,7 @@ if (isset($db)) {
     </div>
 
     <!-- P&L Breakdown -->
-    <div class="bg-white border border-slate-200 rounded-lg overflow-hidden">
+    <div id="pl" class="scroll-mt-4 bg-white border border-slate-200 rounded-lg overflow-hidden">
         <div class="px-5 py-3 border-b border-slate-200 flex items-center justify-between">
             <h2 class="text-sm font-semibold text-slate-700">Monthly Profit / Loss</h2>
             <span class="text-sm font-semibold <?= $pColor ?>"><?= money($pl['profit']) ?> / mo &nbsp;·&nbsp; <?= number_format($pl['margin'], 1) ?>% margin</span>
@@ -303,7 +305,7 @@ if (isset($db)) {
     <?php endif ?>
 
     <!-- Domains -->
-    <section>
+    <section id="domains" class="scroll-mt-4">
         <div class="flex items-center justify-between mb-2">
             <h2 class="text-sm font-semibold text-slate-700">Domains</h2>
             <a href="/clients/<?= $client['id'] ?>/domains/create" class="text-xs text-accent-600 hover:underline">+ Add Domain</a>
@@ -428,7 +430,7 @@ if (isset($db)) {
         </thead>
     <?php }
     ?>
-    <section>
+    <section id="sites" class="scroll-mt-4">
         <div class="flex items-center justify-between mb-2">
             <h2 class="text-sm font-semibold text-slate-700">Sites</h2>
             <a href="/clients/<?= $client['id'] ?>/sites/create" class="text-xs text-accent-600 hover:underline">+ Add Site</a>
@@ -466,7 +468,7 @@ if (isset($db)) {
     </section>
 
     <!-- Recurring Income -->
-    <section>
+    <section id="income" class="scroll-mt-4">
         <div class="flex items-center justify-between mb-2">
             <h2 class="text-sm font-semibold text-slate-700">Recurring Income</h2>
             <span class="text-xs text-slate-400">From FreeAgent · read-only</span>
@@ -539,7 +541,7 @@ if (isset($db)) {
     </section>
 
     <!-- Projects -->
-    <section>
+    <section id="projects" class="scroll-mt-4">
         <div class="flex items-center justify-between mb-2">
             <h2 class="text-sm font-semibold text-slate-700">Projects</h2>
             <a href="/projects/create?client_id=<?= $client['id'] ?>" class="text-xs text-accent-600 hover:underline">+ Add Project</a>
@@ -609,7 +611,7 @@ if (isset($db)) {
     </section>
 
     <!-- Expenses -->
-    <section>
+    <section id="expenses" class="scroll-mt-4">
         <div class="flex items-center justify-between mb-2">
             <h2 class="text-sm font-semibold text-slate-700">Expenses</h2>
             <a href="/expenses/create?client_id=<?= (int)$client['id'] ?>" class="text-xs text-accent-600 hover:underline">+ Add Expense</a>
@@ -654,7 +656,7 @@ if (isset($db)) {
 
 
     <!-- Attachments -->
-    <section>
+    <section id="attachments" class="scroll-mt-4">
         <div class="flex items-center justify-between mb-2"><h2 class="text-sm font-semibold text-slate-700">PDF Attachments</h2></div>
         <form method="POST" enctype="multipart/form-data" action="/clients/<?= $client['id'] ?>/attachments" class="bg-white border border-slate-200 rounded-lg p-4 flex flex-wrap gap-2 items-center">
             <select name="type" class="border rounded px-2 py-1 text-sm"><option value="proposal">Proposal</option><option value="contract">Contract</option><option value="agreement">Agreement</option></select>
@@ -680,7 +682,7 @@ if (isset($db)) {
 
     <!-- FreeAgent Data -->
     <?php if ($faConnected): ?>
-    <section>
+    <section id="freeagent" class="scroll-mt-4">
         <div class="flex items-center justify-between mb-2">
             <h2 class="text-sm font-semibold text-slate-700">FreeAgent</h2>
             <?php if (!$faContact): ?>

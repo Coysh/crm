@@ -115,6 +115,12 @@ $router->get('/', function () use ($db) {
     (new CoyshCRM\Controllers\DashboardController($db))->index();
 });
 
+// ── Today (attention list) ─────────────────────────────────────────────────
+$router->get('/today', function () use ($db) { (new CoyshCRM\Controllers\AttentionController($db))->today(); });
+$router->post('/attention/snooze', function () use ($db) { (new CoyshCRM\Controllers\AttentionController($db))->snooze(); });
+$router->post('/attention/unsnooze', function () use ($db) { (new CoyshCRM\Controllers\AttentionController($db))->unsnooze(); });
+$router->post('/renewals/renew', function () use ($db) { (new CoyshCRM\Controllers\AttentionController($db))->renew(); });
+
 // ── Email marketing ────────────────────────────────────────────────────────
 $router->get('/email', function () use ($db) { (new CoyshCRM\Controllers\EmailController($db))->index(); });
 $router->get('/email/contacts', function () use ($db) { (new CoyshCRM\Controllers\EmailController($db))->contacts(); });
