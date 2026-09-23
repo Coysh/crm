@@ -35,7 +35,8 @@ class ClientController
         ];
 
         $clients      = $this->model->findAllWithFilters($filter === 'all' ? null : $filter, $filters);
-        $clientHealth = $this->model->getHealthAll();
+        // Pass the grouped P&L so health doesn't fall back to a per-client getPL().
+        $clientHealth = $this->model->getHealthAll($this->model->getPLAll());
 
         // Apply health filter in PHP (uses computed health data)
         if ($filters['health'] !== 'all') {
@@ -78,6 +79,7 @@ class ClientController
             $client = $this->model->findById($id);
             if ($client && $client['status'] === 'active') {
                 $this->model->update($id, ['status' => 'archived', 'updated_at' => date('Y-m-d H:i:s')]);
+                if (!empty($_POST['cascade'])) $this->model->archiveRelated($id);
                 $count++;
             }
         }
@@ -169,10 +171,25 @@ class ClientController
             return;
         }
 
-        $health      = $this->model->getHealth($id);
-        $fx          = new ExchangeRateService($this->db);
-        $breadcrumbs = [['Clients', '/clients'], [$client['name'], null]];
-        render('clients.show', compact('client', 'health', 'fx', 'breadcrumbs'), $client['name']);
+        $health        = $this->model->getHealth($id);
+        $archiveImpact = $client['status'] === 'active' ? $this->model->archiveImpact($id) : null;
+        $fx            = new ExchangeRateService($this->db);
+        $breadcrumbs   = [['Clients', '/clients'], [$client['name'], null]];
+        render('clients.show', compact('client', 'health', 'archiveImpact', 'fx', 'breadcrumbs'), $client['name']);
+    }
+
+    public function addNote(int $id): void
+    {
+        if (!csrfCheck()) { flash('error', 'Session expired — please try again.'); redirect("/clients/$id#notes"); }
+        $note = trim((string)($_POST['note'] ?? ''));
+        if ($note === '') { redirect("/clients/$id#notes"); }
+        try {
+            $this->model->appendNote($id, $note);
+            flash('success', 'Note added.');
+        } catch (\InvalidArgumentException) {
+            redirect('/clients');
+        }
+        redirect("/clients/$id#notes");
     }
 
     public function create(): void
@@ -257,6 +274,11 @@ class ClientController
         $newStatus = $client['status'] === 'active' ? 'archived' : 'active';
         $this->model->update($id, ['status' => $newStatus, 'updated_at' => date('Y-m-d H:i:s')]);
 
+        $cascaded = null;
+        if ($newStatus === 'archived' && !empty($_POST['cascade'])) {
+            $cascaded = $this->model->archiveRelated($id);
+        }
+
         // Return JSON for AJAX requests
         if (!empty($_SERVER['HTTP_X_REQUESTED_WITH'])) {
             header('Content-Type: application/json');
@@ -265,7 +287,13 @@ class ClientController
         }
 
         $label = $newStatus === 'archived' ? 'archived' : 'restored';
-        flash('success', "Client '{$client['name']}' $label.");
+        $extra = '';
+        if ($cascaded) {
+            $extra = " Also archived {$cascaded['sites']} site(s) and {$cascaded['domains']} domain(s), and removed {$cascaded['cost_links']} cost link(s).";
+        } elseif ($newStatus === 'active') {
+            $extra = ' Sites and domains archived with it stay archived — restore them from Sites / Domains if needed.';
+        }
+        flash('success', "Client '{$client['name']}' $label.$extra");
         redirect("/clients/$id");
     }
 

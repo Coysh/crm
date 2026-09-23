@@ -329,6 +329,43 @@ class SiteController
         redirect('/sites');
     }
 
+    /** Assign many sites to one client, keeping each linked domain's client in step (like updateClient()). */
+    public function bulkUpdateClient(): void
+    {
+        if (!csrfCheck()) {
+            flash('error', 'Your session expired. Please try again.');
+            redirect('/sites');
+        }
+
+        $ids = array_values(array_unique(array_filter(
+            array_map('intval', (array)($_POST['site_ids'] ?? []))
+        )));
+        $back = $_POST['return_to'] ?? '/sites';
+        if (!str_starts_with($back, '/')) $back = '/sites';
+
+        $clientId = (int)($_POST['client_id'] ?? 0);
+        $stmt = $this->db->prepare("SELECT name FROM clients WHERE id = ? LIMIT 1");
+        $stmt->execute([$clientId]);
+        $clientName = $stmt->fetchColumn();
+        if (!$ids || !$clientName) {
+            flash('error', $ids ? 'Choose a client.' : 'No sites selected.');
+            redirect($back);
+        }
+
+        $in = implode(',', array_fill(0, count($ids), '?'));
+        $this->db->beginTransaction();
+        $stmt = $this->db->prepare("UPDATE client_sites SET client_id = ? WHERE id IN ($in)");
+        $stmt->execute([$clientId, ...$ids]);
+        $count = $stmt->rowCount();
+        $this->db->prepare(
+            "UPDATE domains SET client_id = ? WHERE id IN (SELECT domain_id FROM client_sites WHERE id IN ($in) AND domain_id IS NOT NULL)"
+        )->execute([$clientId, ...$ids]);
+        $this->db->commit();
+
+        flash('success', "$count site" . ($count !== 1 ? 's' : '') . " assigned to " . $clientName . '.');
+        redirect($back);
+    }
+
     public function updateClient(int $id): void
     {
         $clientId = $_POST['client_id'] !== '' ? (int)$_POST['client_id'] : null;

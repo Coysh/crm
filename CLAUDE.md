@@ -15,13 +15,20 @@ php -S localhost:8080 -t public/
 # Run database migrations
 php scripts/migrate.php
 
-# Seed sample data
+# Seed sample data (refuses on production or a populated DB unless --force)
 php scripts/seed.php
+
+# Snapshot DB + app.key into data/backups/ (VACUUM INTO, keeps 14)
+php scripts/backup.php
 
 # Install PHP dependencies
 composer install
 
-# Sync scripts (cron-friendly, bootstrap independently)
+# Single cron entry point — runs whichever jobs below are due (Services\JobRunner::JOBS),
+# each in its own background process with its own lock, logged to job_runs
+php scripts/cron.php               # --foreground | --job=ploi | --status
+
+# Individual jobs (still runnable by hand; bootstrap independently)
 php scripts/ploi-sync.php
 php scripts/freeagent-sync.php
 php scripts/cloudflare-sync.php
@@ -78,7 +85,7 @@ Request flow: `public/index.php` (front controller) → `src/bootstrap.php` (DB 
 - Controllers handle HTTP requests and delegate to models; no base controller class
 - Models extend `Models\Model` (raw PDO, no ORM)
 - Views are plain PHP templates; `src/Views/layouts/main.php` wraps app pages, `layouts/auth.php` wraps login/consent pages
-- Migrations are numbered SQL files in `migrations/` (currently 001–031) run in order by `scripts/migrate.php`, tracked in `_migrations`
+- Migrations are numbered SQL files in `migrations/` (currently 001–036) run in order by `scripts/migrate.php`, tracked in `_migrations`
 - Shared helpers live in `src/bootstrap.php`: `render()`, `redirect()`, `flash()`, `csrfToken/csrfField/csrfCheck()`, `e()`, `money()`, `formatCurrency()`, `formatDate()`, `statusBadge()`, `healthFlagLabel()`, `appUrl()`
 - Column feature-detection via `try { SELECT col LIMIT 0 } catch` is used to tolerate partially-migrated DBs — follow the same pattern for new columns
 
@@ -109,7 +116,13 @@ Request flow: `public/index.php` (front controller) → `src/bootstrap.php` (DB 
 
 **Health flags** (`Client::getHealth/getHealthAll`): `loss_making`, `no_retainer`, `no_recent_invoice`, `overdue_invoices`, `incomplete_setup`, `no_agreement` (support/consultancy types only; satisfied by an active agreement OR legacy `agreement_notes`), `agreement_renewal_overdue`, `hours_exhausted`, `site_down`, `site_unmonitored` (managed only). Labels via `healthFlagLabel()`. The last two are gated on `Client::uptimeMonitoringActive()` (migration 032 applied **and** Uptime Kuma connected) — without that gate every client would trip `site_unmonitored` the moment the migration lands.
 
-**Renewals:** `Services\Renewals::fetch($days, $type, $clientId)` unions domains, recurring costs, recurring invoices, and agreement renewal dates — used by the dashboard, `/renewals`, insights, and MCP.
+**Renewals:** `Services\Renewals::fetch($days, $type, $clientId)` unions domains, recurring costs, recurring invoices, and agreement renewal dates (each row carries `item_id`) — used by the dashboard, `/renewals`, insights, `/today` and MCP. Overdue rows stay for a year; archived domains/clients are excluded. `Renewals::markRenewed($type, $id)` ("Mark renewed", `POST /renewals/renew`) rolls a domain forward by `renewal_years`, a recurring cost by its cycle and an agreement by a year, repeating until the date is ≥ today. Recurring invoices aren't renewable — FreeAgent advances them.
+
+**Today / attention list (migration 038):** `Services\Attention::items()` is the single "what needs me" feed — sites down, failed/stale `job_runs`, overdue invoices, renewals within 14 days, SLA hours ≥80%, chronic health flags and the Data Quality count — each with a severity (`high`/`medium`/`low`), a fix URL and a stable **incident key** (e.g. `renewal:domain:34:2026-10-01`, `site_down:12:<status_changed_at>`), so snoozing/dismissing never hides the next occurrence. Snoozes live in `attention_snoozes` (`snoozed_until` NULL = dismissed). Shown on `/today`, at the top of the dashboard (high + medium) and as the nav badge (`badgeCount()`, session-cached 60s; call `Attention::forgetBadge()` after anything that resolves an item). Buttons are wired by `public/js/attention.js` via `data-attention-*` attributes and post with the `X-CSRF-Token` header from the layout's `csrf-token` meta tag — reuse that for new AJAX POSTs. Invoices imported from Hiveage never re-sync, so an unpaid one is `low` ("set a status override") rather than urgent. To add a source: a private method returning `$this->item(...)` rows, listed in `items()`.
+
+**Notifications (migration 039):** `Services\Notifier` emails the attention list to the owner — a daily digest at `notification_config.digest_time` (**Europe/London**, not UTC; high + medium only unless `include_low`, skipped when empty) and an immediate site-down alert once per outage key (`notification_log`). Run every 5 min by `scripts/notify.php` (job `notifications`; `--dry-run` prints the digest, `--digest-now` forces one). Sent via `MailgunTransport::sendSystem()` — no tracking, tag `crm-system`, no List-Unsubscribe — **not** through `EmailRenderer`, whose footer is marketing-specific. Links use `APP_URL`, else `notification_config.app_url` (captured from the browser when the settings form is saved, because cron has no Host header). Configured on `/settings#notifications`.
+
+**Day-to-day shortcuts:** global search in the sidebar (`GET /search?q=` → `SearchController`, `public/js/search.js`; `/` focuses it) across clients, domains, sites, projects and agreements. The client page has a sticky jump bar over section anchors (`#health #agreements #pl #notes #domains #sites #income #projects #expenses #attachments #freeagent` — fix links from `/today` target these), an inline dated "Add note" (`Client::appendNote()`, shared with MCP `add_client_note`), and work logging on **any** active agreement. **Archiving a client** can cascade (`cascade=1` → `Client::archiveRelated()`): archives its active sites and domains and **deletes** its `recurring_cost_clients` links, since otherwise its cost share silently drops out of the P&L; restoring does not reverse it. `/sites` bulk bar assigns a client (`POST /sites/bulk-client`, also moves each site's domain). Data Quality rows with a `fix` get inline client pickers/suggestions via `POST /settings/data-quality/fix`, including the site-vs-domain client mismatch check.
 
 **Enum-style TEXT columns** (enforce at app layer, not DB):
 - `clients.status`: `active` | `archived`; `clients.client_type`: `managed` | `support_only` | `consultancy_only`
@@ -197,7 +210,7 @@ All optional — core CRM works without them. Config in per-integration tables (
 
 ## MCP Server (migration 028)
 
-Remote MCP endpoint for Claude web/app custom connectors: `POST /mcp` — Streamable HTTP, POST-only JSON (no SSE), stateless. `McpController` (transport/JSON-RPC) + `Services\McpTools` (tool schemas + dispatch). Read tools: `list_clients`, `get_client`, `get_client_pl`, `list_agreements`, `get_agreement`, `list_agreement_work`, `list_renewals`, `list_domains`, `list_site_uptime`, `business_summary`. Write tools (no deletes/edits): `log_agreement_work`, `add_client_note`.
+Remote MCP endpoint for Claude web/app custom connectors: `POST /mcp` — Streamable HTTP, POST-only JSON (no SSE), stateless. `McpController` (transport/JSON-RPC) + `Services\McpTools` (tool schemas + dispatch). Read tools: `list_clients`, `get_client`, `get_client_pl`, `list_agreements`, `get_agreement`, `list_agreement_work`, `list_renewals` (with `id`, `client_id` filter), `list_domains`, `list_site_uptime`, `business_summary`, `get_attention` (the Today list — the natural starting point), `list_invoices`, `get_client_health`, `search`, `get_sync_status`. Write tools (no deletes/free-form edits): `log_agreement_work`, `add_client_note`, `mark_renewal_done`, `snooze_attention_item`. Keep `isWriteTool()` in step when adding writes.
 
 Auth is OAuth 2.1 (`OAuthController` + `Services\OAuthService`): discovery at `/.well-known/oauth-authorization-server` and `/.well-known/oauth-protected-resource`, anonymous DCR at `/oauth/register` (https redirect URIs only), consent at `/oauth/authorize`/`/oauth/approve` behind the CRM login+TOTP, `/oauth/token` with mandatory PKCE S256, 1h access + 30d refresh tokens (sha256-hashed at rest), refresh rotation with family-wide revocation on reuse. Unauthenticated `/mcp` returns 401 + `WWW-Authenticate: Bearer resource_metadata=...` (never a redirect). Rate limiting via `mcp_request_log`. Manage/revoke connected apps at `/settings/mcp`.
 
@@ -218,11 +231,18 @@ composer install --no-dev --optimize-autoloader
 php scripts/migrate.php     # idempotent — safe on every deploy
 ```
 
-Email campaigns also require `APP_URL` to be the public HTTPS CRM URL and this cron entry:
+Email campaigns also require `APP_URL` to be the public HTTPS CRM URL. **One cron line runs
+everything** (syncs, campaigns, backup) — `scripts/cron.php` decides what is due:
 
 ```cron
-* * * * * cd /path/to/coysh-crm && php scripts/email-campaigns.php
+* * * * * cd /path/to/coysh-crm && php scripts/cron.php >> data/cron.log 2>&1
 ```
+
+Remove any older per-script cron lines when switching, or jobs run twice. Job outcomes land in
+`job_runs` (pruned to 14 days) and show in the Scheduled Jobs panel on `/settings`; a job is
+**stale** when it hasn't succeeded within its `stale` window. Scripts signal "not configured"
+by printing `[skip]` and exiting 0, and failure by exiting non-zero — keep to that for new
+jobs. Snapshots from `backup.php` land in `data/backups/`; copy them off the server.
 
 **Do not run `npx tailwindcss` on the server.** Rebuilding `public/css/app.css` there
 leaves the tracked file locally modified, and the next deploy that touches it aborts with
@@ -260,4 +280,4 @@ attribute early.
 
 - New browser-form POST endpoints must call `csrfCheck()` and render `csrfField()` in their forms (legacy forms predate this; `/mcp`, `/oauth/token`, `/oauth/register` are correctly CSRF-exempt — no session semantics)
 - Never echo decrypted secrets into HTML (masked placeholder + empty value instead)
-- Next migration number: 035
+- Next migration number: 037

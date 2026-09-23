@@ -86,7 +86,8 @@ class ExpenseController
 
     public function create(): void
     {
-        $expense     = [];
+        // Pre-select the client when arriving from a client page.
+        $expense     = isset($_GET['client_id']) ? ['client_id' => (int)$_GET['client_id']] : [];
         $errors      = [];
         $clients     = $this->clientModel->findAll([], 'name');
         $servers     = $this->serverModel->findAll([], 'name');

@@ -115,6 +115,15 @@ $router->get('/', function () use ($db) {
     (new CoyshCRM\Controllers\DashboardController($db))->index();
 });
 
+// ── Global search (sidebar box) ────────────────────────────────────────────
+$router->get('/search', function () use ($db) { (new CoyshCRM\Controllers\SearchController($db))->search(); });
+
+// ── Today (attention list) ─────────────────────────────────────────────────
+$router->get('/today', function () use ($db) { (new CoyshCRM\Controllers\AttentionController($db))->today(); });
+$router->post('/attention/snooze', function () use ($db) { (new CoyshCRM\Controllers\AttentionController($db))->snooze(); });
+$router->post('/attention/unsnooze', function () use ($db) { (new CoyshCRM\Controllers\AttentionController($db))->unsnooze(); });
+$router->post('/renewals/renew', function () use ($db) { (new CoyshCRM\Controllers\AttentionController($db))->renew(); });
+
 // ── Email marketing ────────────────────────────────────────────────────────
 $router->get('/email', function () use ($db) { (new CoyshCRM\Controllers\EmailController($db))->index(); });
 $router->get('/email/contacts', function () use ($db) { (new CoyshCRM\Controllers\EmailController($db))->contacts(); });
@@ -152,6 +161,8 @@ $router->post('/email/campaigns/(\d+)/recipients/(\d+)/retry', function ($id, $r
 foreach (['draft','pause','resume','cancel'] as $emailAction) {
     $router->post('/email/campaigns/(\d+)/' . $emailAction, function ($id) use ($db, $emailAction) { (new CoyshCRM\Controllers\EmailController($db))->campaignAction((int)$id, $emailAction); });
 }
+$router->post('/settings/notifications', function () use ($db) { (new CoyshCRM\Controllers\SettingsController($db))->saveNotifications(); });
+$router->post('/settings/notifications/test', function () use ($db) { (new CoyshCRM\Controllers\SettingsController($db))->testDigest(); });
 $router->get('/settings/email', function () use ($db) { (new CoyshCRM\Controllers\EmailController($db))->settings(); });
 $router->post('/settings/email', function () use ($db) { (new CoyshCRM\Controllers\EmailController($db))->saveSettings(); });
 $router->post('/settings/email/verify', function () use ($db) { (new CoyshCRM\Controllers\EmailController($db))->verifySettings(); });
@@ -167,6 +178,9 @@ $router->get('/sites/create', function () use ($db) {
 });
 $router->post('/sites', function () use ($db) {
     (new CoyshCRM\Controllers\SiteController($db))->store();
+});
+$router->post('/sites/bulk-client', function () use ($db) {
+    (new CoyshCRM\Controllers\SiteController($db))->bulkUpdateClient();
 });
 $router->post('/sites/bulk-server', function () use ($db) {
     (new CoyshCRM\Controllers\SiteController($db))->bulkUpdateServer();
@@ -214,6 +228,9 @@ $router->get('/clients/(\d+)/edit', function ($id) use ($db) {
 });
 $router->post('/clients/(\d+)', function ($id) use ($db) {
     (new CoyshCRM\Controllers\ClientController($db))->update((int)$id);
+});
+$router->post('/clients/(\d+)/notes', function ($id) use ($db) {
+    (new CoyshCRM\Controllers\ClientController($db))->addNote((int)$id);
 });
 $router->post('/clients/(\d+)/archive', function ($id) use ($db) {
     (new CoyshCRM\Controllers\ClientController($db))->archive((int)$id);
@@ -515,6 +532,9 @@ $router->post('/settings/ploi/sync-domains', function () use ($db) {
 });
 $router->post('/settings/ploi/exclusions/(\d+)/remove', function ($id) use ($db) {
     (new CoyshCRM\Controllers\SettingsController($db))->removePloiExclusion((int)$id);
+});
+$router->post('/settings/data-quality/fix', function () use ($db) {
+    (new CoyshCRM\Controllers\DataQualityController($db))->fix();
 });
 $router->get('/settings/data-quality', function () use ($db) {
     (new CoyshCRM\Controllers\DataQualityController($db))->index();

@@ -22,33 +22,24 @@ function dashDiff(float $a, float $b, bool $lowerIsBetter = false): array
         </div>
     </div>
 
-    <?php if (!empty($sitesDown)): ?>
-    <!-- Sites currently down -->
-    <div class="bg-red-50 border border-red-200 rounded-lg overflow-hidden">
-        <div class="px-5 py-3 border-b border-red-200 flex items-center gap-2">
-            <span class="w-2 h-2 rounded-full bg-red-500"></span>
-            <h2 class="text-sm font-semibold text-red-800">
-                <?= count($sitesDown) === 1 ? '1 site down' : count($sitesDown) . ' sites down' ?>
+    <!-- Needs attention (urgent + this week); full list on /today -->
+    <?php $hasHigh = (bool)array_filter($attentionItems, fn($i) => $i['severity'] === 'high'); ?>
+    <div class="bg-white border <?= $hasHigh ? 'border-red-200' : 'border-slate-200' ?> rounded-lg overflow-hidden" data-attention-group>
+        <div class="px-5 py-3 border-b <?= $hasHigh ? 'border-red-200 bg-red-50' : 'border-slate-200' ?> flex items-center justify-between gap-3">
+            <h2 class="text-sm font-semibold <?= $hasHigh ? 'text-red-800' : 'text-slate-700' ?>">
+                Needs attention <span class="font-normal text-slate-400" data-attention-count><?= count($attentionItems) ?></span>
             </h2>
+            <a href="/today" class="text-xs text-accent-600 hover:underline">Open Today<?= $attentionLowCount ? " (+{$attentionLowCount} housekeeping)" : '' ?> →</a>
         </div>
-        <ul class="divide-y divide-red-100">
-            <?php foreach ($sitesDown as $down): ?>
-                <li class="px-5 py-2.5 flex flex-wrap items-baseline gap-x-3 gap-y-1 text-sm">
-                    <a href="/sites/<?= (int)$down['site_id'] ?>" class="font-mono text-xs text-red-700 hover:underline">
-                        <?= e($down['domain'] ?: $down['monitor_name']) ?>
-                    </a>
-                    <?php if ($down['client_id']): ?>
-                        <a href="/clients/<?= (int)$down['client_id'] ?>" class="text-slate-600 hover:underline"><?= e($down['client_name']) ?></a>
-                    <?php else: ?>
-                        <span class="text-slate-400 italic text-xs">Unassigned</span>
-                    <?php endif ?>
-                    <span class="text-xs text-slate-500"><?= e($down['monitor_name']) ?></span>
-                    <span class="text-xs text-red-600 ml-auto">down for <?= formatDurationSince($down['status_changed_at']) ?></span>
-                </li>
-            <?php endforeach ?>
-        </ul>
+        <?php if ($attentionItems): ?>
+            <?php $items = array_slice($attentionItems, 0, 10); include VIEW_PATH . '/attention/_list.php'; ?>
+            <?php if (count($attentionItems) > 10): ?>
+                <p class="px-5 py-2 text-xs text-slate-500 border-t border-slate-100"><a href="/today" class="text-accent-600 hover:underline"><?= count($attentionItems) - 10 ?> more on Today →</a></p>
+            <?php endif ?>
+        <?php else: ?>
+            <p class="px-5 py-4 text-sm text-green-700">Nothing urgent — all clear.</p>
+        <?php endif ?>
     </div>
-    <?php endif ?>
 
     <!-- Summary Cards -->
     <div class="grid grid-cols-2 lg:grid-cols-5 gap-4">
@@ -262,11 +253,9 @@ function dashDiff(float $a, float $b, bool $lowerIsBetter = false): array
                 <li class="px-5 py-3 flex items-center justify-between gap-4 text-sm">
                     <div class="flex items-center gap-2 min-w-0">
                         <span class="inline-block px-1.5 py-0.5 rounded text-xs font-medium shrink-0 <?= $typeBadge ?>"><?= $typeLabel ?></span>
+                        <a href="<?= e($r['detail_url'] ?? ('/clients/' . $r['client_id'])) ?>" class="font-medium text-slate-800 hover:text-accent-600 truncate"><?= e($r['name']) ?></a>
                         <?php if ($r['client_id']): ?>
-                            <a href="/clients/<?= $r['client_id'] ?>" class="font-medium text-slate-800 hover:text-accent-600 truncate"><?= e($r['name']) ?></a>
-                            <span class="text-slate-400 text-xs shrink-0">— <?= e($r['client_name']) ?></span>
-                        <?php else: ?>
-                            <span class="font-medium text-slate-800 truncate"><?= e($r['name']) ?></span>
+                            <a href="/clients/<?= $r['client_id'] ?>" class="text-slate-400 hover:text-accent-600 text-xs shrink-0">— <?= e($r['client_name']) ?></a>
                         <?php endif ?>
                     </div>
                     <div class="text-right shrink-0 flex items-center gap-3">
@@ -338,18 +327,19 @@ function dashDiff(float $a, float $b, bool $lowerIsBetter = false): array
         <div class="px-5 py-3 border-b border-slate-200 flex items-center justify-between">
             <h2 class="text-sm font-semibold text-slate-700">Client Health</h2>
             <div class="flex items-center gap-4 text-xs">
-                <a href="/insights?section=health&amp;health=healthy" class="text-green-600 hover:underline">
+                <a href="/insights?health=healthy#health" class="text-green-600 hover:underline">
                     <?= $healthCounts['healthy'] ?> healthy
                 </a>
-                <a href="/insights?section=health&amp;health=attention" class="text-amber-600 hover:underline">
+                <a href="/insights?health=attention#health" class="text-amber-600 hover:underline">
                     <?= $healthCounts['attention'] ?> attention
                 </a>
-                <a href="/insights?section=health&amp;health=at_risk" class="text-red-600 hover:underline">
+                <a href="/insights?health=at_risk#health" class="text-red-600 hover:underline">
                     <?= $healthCounts['at_risk'] ?> at risk
                 </a>
             </div>
         </div>
-        <?php if ($healthRows): ?>
+        <?php $unhealthyRows = array_filter($healthRows, fn($r) => $r['status'] !== 'healthy'); ?>
+        <?php if ($unhealthyRows): ?>
         <div class="overflow-x-auto">
         <table class="w-full text-sm">
             <thead class="bg-slate-50 text-xs text-slate-500 uppercase tracking-wide">
@@ -361,7 +351,8 @@ function dashDiff(float $a, float $b, bool $lowerIsBetter = false): array
             </thead>
             <tbody class="divide-y divide-slate-100">
                 <?php
-                foreach ($healthRows as $row):
+                // Healthy clients add noise here; their count is in the header.
+                foreach ($unhealthyRows as $row):
                     $dotCls = match($row['status']) {
                         'healthy'   => 'bg-green-500',
                         'attention' => 'bg-amber-400',
@@ -403,7 +394,7 @@ function dashDiff(float $a, float $b, bool $lowerIsBetter = false): array
         </table>
         </div>
         <?php else: ?>
-            <p class="px-5 py-6 text-sm text-slate-400">No active clients.</p>
+            <p class="px-5 py-6 text-sm text-slate-400"><?= $healthRows ? 'Every client is passing all health checks.' : 'No active clients.' ?></p>
         <?php endif ?>
     </div>
 

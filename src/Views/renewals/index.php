@@ -58,7 +58,7 @@
                             default             => $r['type'],
                         };
                     ?>
-                    <li class="px-5 py-3 flex flex-wrap items-center justify-between gap-3 text-sm">
+                    <li class="px-5 py-3 flex flex-wrap items-center justify-between gap-3 text-sm" data-attention-row data-severity="none">
                         <div class="flex items-center gap-2 min-w-0">
                             <span class="inline-block px-1.5 py-0.5 rounded text-xs font-medium shrink-0 <?= $typeBadge ?>"><?= $typeLabel ?></span>
                             <a href="<?= e($r['detail_url']) ?>" class="font-medium text-slate-800 hover:text-accent-600 truncate"><?= e($r['name']) ?></a>
@@ -72,6 +72,12 @@
                             <span class="text-slate-600 font-medium"><?= $r['amount'] !== null ? money($r['amount']) : '—' ?></span>
                             <span class="text-xs text-slate-400 w-20 text-left"><?= formatDate($r['due_date']) ?></span>
                             <span class="text-xs w-16 text-right <?= $urgCls ?>"><?= e($r['relative']) ?></span>
+                            <?php if (in_array($r['type'], \CoyshCRM\Services\Renewals::RENEWABLE, true)): ?>
+                                <button type="button" data-attention-renew data-type="<?= e($r['type']) ?>" data-id="<?= (int)$r['item_id'] ?>"
+                                        class="px-2 py-1 border border-slate-300 rounded text-xs hover:bg-slate-50" title="Roll the renewal date forward one term">Renewed</button>
+                            <?php else: ?>
+                                <span class="w-[4.5rem]"></span>
+                            <?php endif ?>
                         </div>
                     </li>
                     <?php endforeach ?>

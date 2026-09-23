@@ -9,6 +9,9 @@ $migrationsPath = $basePath . '/migrations';
 $db = new PDO('sqlite:' . $dbPath, null, null, [
     PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
 ]);
+// Wait out concurrent writers (cron, MCP). Foreign keys stay OFF deliberately:
+// table-rebuild migrations (e.g. 033) would otherwise cascade-delete child rows.
+$db->exec('PRAGMA busy_timeout = 5000');
 
 $db->exec("CREATE TABLE IF NOT EXISTS _migrations (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

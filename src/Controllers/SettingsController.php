@@ -6,6 +6,7 @@ namespace CoyshCRM\Controllers;
 
 use CoyshCRM\Services\ExchangeRateService;
 use CoyshCRM\Services\FreeAgentClient;
+use CoyshCRM\Services\JobRunner;
 use CoyshCRM\Services\PloiService;
 use CoyshCRM\Services\PloiSync;
 use CoyshCRM\Services\WpmgrService;
@@ -75,7 +76,18 @@ class SettingsController
 
         $dataQualityIssues = DataQualityController::issueCount($this->db);
 
-        render('settings.index', compact('faCfg', 'connected', 'ploiCfg', 'ploiConnected', 'ploiStats', 'wpmgrCfg', 'wpmgrConnected', 'wpmgrStats', 'kumaCfg', 'kumaConnected', 'kumaStats', 'exchangeRates', 'dataQualityIssues'), 'Settings');
+        $notifyCfg     = (new \CoyshCRM\Services\Notifier($this->db))->config();
+        $mailgunReady  = false;
+        try {
+            $mg = $this->db->query("SELECT api_key, sending_domain FROM email_marketing_config WHERE id = 1")->fetch();
+            $mailgunReady = !empty($mg['api_key']) && !empty($mg['sending_domain']);
+        } catch (\Throwable) {}
+
+        $jobRunner     = new JobRunner($this->db);
+        $jobs          = $jobRunner->status();
+        $cronInstalled = $jobRunner->isInstalled();
+
+        render('settings.index', compact('faCfg', 'connected', 'ploiCfg', 'ploiConnected', 'ploiStats', 'wpmgrCfg', 'wpmgrConnected', 'wpmgrStats', 'kumaCfg', 'kumaConnected', 'kumaStats', 'exchangeRates', 'dataQualityIssues', 'jobs', 'cronInstalled', 'notifyCfg', 'mailgunReady'), 'Settings');
     }
 
     public function refreshExchangeRates(): void
@@ -127,6 +139,47 @@ class SettingsController
      * Latest undismissed sync failure since the last successful full sync.
      * Older failures are considered resolved once a full sync completes.
      */
+    public function saveNotifications(): void
+    {
+        if (!csrfCheck()) { flash('error', 'Session expired — please try again.'); redirect('/settings#notifications'); }
+
+        $recipient = trim((string)($_POST['recipient'] ?? ''));
+        $time      = (string)($_POST['digest_time'] ?? '07:30');
+        $digest    = !empty($_POST['digest_enabled']);
+        $alerts    = !empty($_POST['site_down_alerts']);
+
+        if ($recipient !== '' && !filter_var($recipient, FILTER_VALIDATE_EMAIL)) {
+            flash('error', 'Enter a valid email address.');
+            redirect('/settings#notifications');
+        }
+        if (($digest || $alerts) && $recipient === '') {
+            flash('error', 'Add a recipient email to turn notifications on.');
+            redirect('/settings#notifications');
+        }
+        if (!preg_match('/^([01]\d|2[0-3]):[0-5]\d$/', $time)) $time = '07:30';
+
+        // appUrl() here reflects the browser's host; cron has none, so keep it for links.
+        $this->db->prepare(
+            "UPDATE notification_config SET digest_enabled = ?, recipient = ?, digest_time = ?, include_low = ?,
+                    site_down_alerts = ?, app_url = ?, updated_at = datetime('now') WHERE id = 1"
+        )->execute([(int)$digest, $recipient ?: null, $time, (int)!empty($_POST['include_low']), (int)$alerts, appUrl()]);
+
+        flash('success', 'Notification settings saved.');
+        redirect('/settings#notifications');
+    }
+
+    public function testDigest(): void
+    {
+        if (!csrfCheck()) { flash('error', 'Session expired — please try again.'); redirect('/settings#notifications'); }
+        try {
+            $result = (new \CoyshCRM\Services\Notifier($this->db))->sendDigest();
+            flash('success', $result['reason'] . '.');
+        } catch (\Throwable $e) {
+            flash('error', 'Digest failed: ' . $e->getMessage());
+        }
+        redirect('/settings#notifications');
+    }
+
     private function lastPloiError(): ?array
     {
         try {

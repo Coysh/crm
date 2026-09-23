@@ -28,3 +28,6 @@ data/*.key
 
 # Logs
 *.log
+
+# Local snapshots (scripts/backup.php) — copy these off-server
+data/backups/

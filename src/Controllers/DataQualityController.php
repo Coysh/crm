@@ -8,10 +8,24 @@ use PDO;
 
 /**
  * Data-quality checks: each check is one labelled query returning offending
- * rows with a link to fix them. Kept read-only.
+ * rows with a link to fix them. Checks that declare a `fix` also get inline
+ * controls (client picker / one-click suggestion) posting to fix().
  */
 class DataQualityController
 {
+    /** Domain whose client differs from the (active) site that uses it; row id = domain id. */
+    private const MISMATCH_SQL = "
+        SELECT d.id, d.domain || ' — site: ' || sc.name || ', domain: ' || dc.name AS label,
+               '/domains/' || d.id AS url, sc.id AS suggest_id, sc.name AS suggest_name
+        FROM client_sites cs
+        JOIN domains d  ON d.id = cs.domain_id
+        JOIN clients sc ON sc.id = cs.client_id
+        JOIN clients dc ON dc.id = d.client_id
+        WHERE cs.client_id != d.client_id
+          AND COALESCE(cs.status, 'active') = 'active' AND COALESCE(d.status, 'active') = 'active'
+        GROUP BY d.id
+        ORDER BY d.domain";
+
     public function __construct(private PDO $db) {}
 
     public function index(): void
@@ -25,7 +39,8 @@ class DataQualityController
              FROM client_sites cs
              LEFT JOIN domains d ON d.id = cs.domain_id
              LEFT JOIN ploi_sites ps ON ps.client_site_id = cs.id
-             WHERE cs.client_id IS NULL AND COALESCE(cs.status, 'active') = 'active' ORDER BY label"
+             WHERE cs.client_id IS NULL AND COALESCE(cs.status, 'active') = 'active' ORDER BY label",
+            'site_client'
         );
 
         $checks[] = $this->check(
@@ -40,10 +55,22 @@ class DataQualityController
         $checks[] = $this->check(
             'Domains without a client',
             'Domains not linked to a client — their cost lands nowhere in the P&L.',
-            "SELECT d.id, d.domain AS label, '/domains/' || d.id AS url
+            "SELECT d.id, d.domain AS label, '/domains/' || d.id AS url,
+                    (SELECT c.id FROM client_sites cs JOIN clients c ON c.id = cs.client_id
+                     WHERE cs.domain_id = d.id ORDER BY cs.id LIMIT 1) AS suggest_id,
+                    (SELECT c.name FROM client_sites cs JOIN clients c ON c.id = cs.client_id
+                     WHERE cs.domain_id = d.id ORDER BY cs.id LIMIT 1) AS suggest_name
              FROM domains d
              WHERE d.client_id IS NULL AND COALESCE(d.status, 'active') = 'active'
-             ORDER BY d.domain"
+             ORDER BY d.domain",
+            'domain_client'
+        );
+
+        $checks[] = $this->check(
+            'Sites and domains assigned to different clients',
+            'The site belongs to one client but its domain to another, so the domain cost and renewal land on the wrong P&L. Usually the site is right.',
+            self::MISMATCH_SQL,
+            'domain_client'
         );
 
         $checks[] = $this->check(
@@ -127,12 +154,14 @@ class DataQualityController
             'description' => 'Database rows whose PDF file no longer exists in data/attachments.',
             'rows'        => $missingFiles,
             'error'       => null,
+            'fix'         => null,
         ];
 
         $totalIssues = array_sum(array_map(fn($c) => count($c['rows']), $checks));
+        $clients     = $this->db->query("SELECT id, name FROM clients WHERE status = 'active' ORDER BY name")->fetchAll();
 
         $breadcrumbs = [['Settings', '/settings'], ['Data Quality', null]];
-        render('settings.data_quality', compact('checks', 'totalIssues', 'breadcrumbs'), 'Data Quality');
+        render('settings.data_quality', compact('checks', 'totalIssues', 'clients', 'breadcrumbs'), 'Data Quality');
     }
 
     /** Count of issues across all checks, for the settings-page badge. */
@@ -148,6 +177,7 @@ class DataQualityController
             "SELECT COUNT(*) FROM clients c WHERE c.status = 'active' AND NOT EXISTS (SELECT 1 FROM agreements a WHERE a.client_id = c.id AND a.status = 'active')",
             "SELECT (SELECT COUNT(*) FROM ploi_servers WHERE is_stale = 1) + (SELECT COUNT(*) FROM ploi_sites WHERE is_stale = 1)",
             "SELECT COUNT(*) FROM recurring_costs rc WHERE rc.is_active = 1 AND rc.server_id IS NULL AND NOT EXISTS (SELECT 1 FROM recurring_cost_clients rcc WHERE rcc.recurring_cost_id = rc.id)",
+            "SELECT COUNT(*) FROM (" . self::MISMATCH_SQL . ")",
         ];
         foreach ($queries as $q) {
             try { $count += (int)$db->query($q)->fetchColumn(); } catch (\Throwable) {}
@@ -155,13 +185,49 @@ class DataQualityController
         return $count;
     }
 
-    private function check(string $title, string $description, string $sql): array
+    private function check(string $title, string $description, string $sql, ?string $fix = null): array
     {
         try {
             $rows = $this->db->query($sql)->fetchAll();
-            return compact('title', 'description', 'rows') + ['error' => null];
+            return compact('title', 'description', 'rows', 'fix') + ['error' => null];
         } catch (\Throwable $e) {
-            return compact('title', 'description') + ['rows' => [], 'error' => $e->getMessage()];
+            return compact('title', 'description', 'fix') + ['rows' => [], 'error' => $e->getMessage()];
         }
+    }
+
+    /**
+     * Inline fix from the Data Quality page (JSON).
+     *   action=site_client   id=site   client_id  — also moves the site's domain (as SiteController::updateClient)
+     *   action=domain_client id=domain client_id
+     */
+    public function fix(): void
+    {
+        header('Content-Type: application/json');
+        if (!csrfCheck()) { http_response_code(419); echo json_encode(['error' => 'Invalid CSRF token']); exit; }
+
+        $action   = (string)($_POST['action'] ?? '');
+        $id       = (int)($_POST['id'] ?? 0);
+        $clientId = (int)($_POST['client_id'] ?? 0);
+
+        $stmt = $this->db->prepare("SELECT name FROM clients WHERE id = ?");
+        $stmt->execute([$clientId]);
+        $clientName = $stmt->fetchColumn();
+        if (!$clientName || $id <= 0 || !in_array($action, ['site_client', 'domain_client'], true)) {
+            http_response_code(422);
+            echo json_encode(['error' => 'Choose a client']);
+            exit;
+        }
+
+        if ($action === 'site_client') {
+            $this->db->prepare("UPDATE client_sites SET client_id = ? WHERE id = ?")->execute([$clientId, $id]);
+            $this->db->prepare(
+                "UPDATE domains SET client_id = ? WHERE id = (SELECT domain_id FROM client_sites WHERE id = ?)"
+            )->execute([$clientId, $id]);
+        } else {
+            $this->db->prepare("UPDATE domains SET client_id = ? WHERE id = ?")->execute([$clientId, $id]);
+        }
+        \CoyshCRM\Services\Attention::forgetBadge();
+        echo json_encode(['ok' => true, 'message' => "Assigned to {$clientName}"]);
+        exit;
     }
 }
