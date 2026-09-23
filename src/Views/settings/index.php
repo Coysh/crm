@@ -1,6 +1,61 @@
 <div class="max-w-3xl space-y-6">
     <h1 class="text-xl font-semibold text-slate-800">Settings</h1>
 
+    <?php
+        $ago = fn(?string $t) => ($d = formatDurationSince($t)) === 'just now' ? $d : "{$d} ago";
+        $lastLine = function (?string $out): string {
+            $lines = array_filter(array_map('trim', explode("\n", (string)$out)));
+            return (string)end($lines);
+        };
+        $stateStyle = [
+            'ok'      => ['bg-green-100 text-green-700', 'OK'],
+            'skipped' => ['bg-slate-100 text-slate-500', 'Not connected'],
+            'running' => ['bg-blue-100 text-blue-700', 'Running'],
+            'failed'  => ['bg-red-100 text-red-700', 'Failed'],
+            'stale'   => ['bg-amber-100 text-amber-700', 'Stale'],
+            'never'   => ['bg-slate-100 text-slate-500', 'Never run'],
+        ];
+    ?>
+    <div class="bg-white border border-slate-200 rounded-lg overflow-hidden" id="jobs">
+        <div class="px-5 py-3 border-b border-slate-200">
+            <h2 class="text-sm font-semibold text-slate-700">Scheduled Jobs</h2>
+        </div>
+        <?php if (!$cronInstalled): ?>
+            <div class="px-5 py-3 text-xs text-amber-800 bg-amber-50 border-b border-amber-200">
+                <code>scripts/cron.php</code> hasn't run yet. Replace the individual sync cron lines with this single entry:
+                <pre class="mt-2 font-mono bg-white border border-amber-200 rounded px-2 py-1 overflow-x-auto">* * * * * cd <?= e(BASE_PATH) ?> &amp;&amp; php scripts/cron.php &gt;&gt; data/cron.log 2&gt;&amp;1</pre>
+            </div>
+        <?php endif ?>
+        <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+            <thead class="bg-slate-50 text-xs text-slate-500 text-left">
+                <tr>
+                    <th class="px-5 py-2 font-medium">Job</th>
+                    <th class="px-3 py-2 font-medium">Schedule</th>
+                    <th class="px-3 py-2 font-medium">Status</th>
+                    <th class="px-3 py-2 font-medium">Last success</th>
+                    <th class="px-5 py-2 font-medium">Last error</th>
+                </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-100">
+            <?php foreach ($jobs as $name => $j): [$cls, $lbl] = $stateStyle[$j['state']]; ?>
+                <tr>
+                    <td class="px-5 py-2"><a href="<?= e($j['url']) ?>" class="text-slate-800 hover:text-accent-600"><?= e($j['label']) ?></a></td>
+                    <td class="px-3 py-2 text-xs text-slate-500 whitespace-nowrap"><?= e($j['schedule']) ?></td>
+                    <td class="px-3 py-2"><span class="inline-block px-1.5 py-0.5 rounded text-xs font-medium <?= $cls ?>"><?= $lbl ?></span></td>
+                    <td class="px-3 py-2 text-xs text-slate-500 whitespace-nowrap"><?= $j['last_ok_at'] ? e($ago($j['last_ok_at'])) : '—' ?></td>
+                    <td class="px-5 py-2 text-xs text-red-600">
+                        <?php if ($j['last_failure']): ?>
+                            <span title="<?= e($j['last_failure']['output']) ?>"><?= e($ago($j['last_failure']['started_at'])) ?> — <?= e(mb_strimwidth($lastLine($j['last_failure']['output']), 0, 90, '…')) ?></span>
+                        <?php endif ?>
+                    </td>
+                </tr>
+            <?php endforeach ?>
+            </tbody>
+        </table>
+        </div>
+    </div>
+
     <div class="grid md:grid-cols-2 gap-4">
         <div class="bg-white border border-slate-200 rounded-lg p-6">
             <h2 class="text-sm font-semibold text-slate-700">Email Marketing</h2>

@@ -6,6 +6,7 @@ namespace CoyshCRM\Controllers;
 
 use CoyshCRM\Services\ExchangeRateService;
 use CoyshCRM\Services\FreeAgentClient;
+use CoyshCRM\Services\JobRunner;
 use CoyshCRM\Services\PloiService;
 use CoyshCRM\Services\PloiSync;
 use CoyshCRM\Services\WpmgrService;
@@ -75,7 +76,11 @@ class SettingsController
 
         $dataQualityIssues = DataQualityController::issueCount($this->db);
 
-        render('settings.index', compact('faCfg', 'connected', 'ploiCfg', 'ploiConnected', 'ploiStats', 'wpmgrCfg', 'wpmgrConnected', 'wpmgrStats', 'kumaCfg', 'kumaConnected', 'kumaStats', 'exchangeRates', 'dataQualityIssues'), 'Settings');
+        $jobRunner     = new JobRunner($this->db);
+        $jobs          = $jobRunner->status();
+        $cronInstalled = $jobRunner->isInstalled();
+
+        render('settings.index', compact('faCfg', 'connected', 'ploiCfg', 'ploiConnected', 'ploiStats', 'wpmgrCfg', 'wpmgrConnected', 'wpmgrStats', 'kumaCfg', 'kumaConnected', 'kumaStats', 'exchangeRates', 'dataQualityIssues', 'jobs', 'cronInstalled'), 'Settings');
     }
 
     public function refreshExchangeRates(): void

@@ -8,27 +8,34 @@ use PDO;
 
 class CloudflareSync
 {
+    /** @var array<string, string> zone_id => error message from the last syncAll() */
+    private array $dnsErrors = [];
+
     public function __construct(private CloudflareService $cf, private PDO $db) {}
 
     public function syncAll(): array
     {
         $zones      = $this->syncZones();
         $dnsRecords = 0;
+        $this->dnsErrors = [];
 
-        // Sync DNS records for all zones
-        try {
-            $rows = $this->db->query("SELECT zone_id FROM cloudflare_zones")->fetchAll(PDO::FETCH_COLUMN);
-            foreach ($rows as $zoneId) {
-                $dnsRecords += $this->syncDnsRecords($zoneId);
+        // Sync DNS records for all zones. Per-zone failures are collected rather
+        // than swallowed so cron can report a partial sync as a failure.
+        $rows = $this->db->query("SELECT zone_id, name FROM cloudflare_zones")->fetchAll(PDO::FETCH_KEY_PAIR);
+        foreach ($rows as $zoneId => $zoneName) {
+            try {
+                $dnsRecords += $this->syncDnsRecords($zoneId, true);
+            } catch (\Throwable $e) {
+                $this->dnsErrors[$zoneName ?: $zoneId] = $e->getMessage();
             }
-        } catch (\Throwable) {}
+        }
 
         // Update last sync timestamp
         try {
             $this->db->exec("UPDATE cloudflare_config SET last_sync_at = datetime('now') WHERE id = 1");
         } catch (\Throwable) {}
 
-        return ['zones' => $zones, 'dns_records' => $dnsRecords];
+        return ['zones' => $zones, 'dns_records' => $dnsRecords, 'errors' => $this->dnsErrors];
     }
 
     public function syncZones(): int
@@ -100,11 +107,12 @@ class CloudflareSync
         return $count;
     }
 
-    public function syncDnsRecords(string $zoneId): int
+    public function syncDnsRecords(string $zoneId, bool $throw = false): int
     {
         try {
             $records = $this->cf->listDnsRecords($zoneId);
-        } catch (\Throwable) {
+        } catch (\Throwable $e) {
+            if ($throw) throw $e;
             return 0;
         }
 

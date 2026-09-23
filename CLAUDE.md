@@ -24,7 +24,11 @@ php scripts/backup.php
 # Install PHP dependencies
 composer install
 
-# Sync scripts (cron-friendly, bootstrap independently)
+# Single cron entry point — runs whichever jobs below are due (Services\JobRunner::JOBS),
+# each in its own background process with its own lock, logged to job_runs
+php scripts/cron.php               # --foreground | --job=ploi | --status
+
+# Individual jobs (still runnable by hand; bootstrap independently)
 php scripts/ploi-sync.php
 php scripts/freeagent-sync.php
 php scripts/cloudflare-sync.php
@@ -221,11 +225,18 @@ composer install --no-dev --optimize-autoloader
 php scripts/migrate.php     # idempotent — safe on every deploy
 ```
 
-Email campaigns also require `APP_URL` to be the public HTTPS CRM URL and this cron entry:
+Email campaigns also require `APP_URL` to be the public HTTPS CRM URL. **One cron line runs
+everything** (syncs, campaigns, backup) — `scripts/cron.php` decides what is due:
 
 ```cron
-* * * * * cd /path/to/coysh-crm && php scripts/email-campaigns.php
+* * * * * cd /path/to/coysh-crm && php scripts/cron.php >> data/cron.log 2>&1
 ```
+
+Remove any older per-script cron lines when switching, or jobs run twice. Job outcomes land in
+`job_runs` (pruned to 14 days) and show in the Scheduled Jobs panel on `/settings`; a job is
+**stale** when it hasn't succeeded within its `stale` window. Scripts signal "not configured"
+by printing `[skip]` and exiting 0, and failure by exiting non-zero — keep to that for new
+jobs. Snapshots from `backup.php` land in `data/backups/`; copy them off the server.
 
 **Do not run `npx tailwindcss` on the server.** Rebuilding `public/css/app.css` there
 leaves the tracked file locally modified, and the next deploy that touches it aborts with

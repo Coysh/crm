@@ -103,6 +103,9 @@ class CloudflareController
             $sync    = new CloudflareSync($this->cf, $this->db);
             $results = $sync->syncAll();
             flash('success', "Cloudflare sync complete. Zones: {$results['zones']}, DNS records: {$results['dns_records']}.");
+            if (!empty($results['errors'])) {
+                flash('error', 'DNS sync failed for ' . count($results['errors']) . ' zone(s): ' . implode(', ', array_keys($results['errors'])) . '.');
+            }
         } catch (\Throwable $e) {
             flash('error', 'Sync failed: ' . $e->getMessage());
         }
