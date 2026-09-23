@@ -155,9 +155,8 @@ class Renewals
         $stmt = $this->db->prepare("SELECT {$nameCol} AS name, {$select} FROM {$table} WHERE id = ?");
         $stmt->execute([$id]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
-        if (!$row || empty($row['renewal_date'])) {
-            throw new \RuntimeException('No renewal date to roll forward');
-        }
+        if (!$row) throw new \RuntimeException(ucfirst(str_replace('_', ' ', $type)) . " #{$id} not found");
+        if (empty($row['renewal_date'])) throw new \RuntimeException('No renewal date to roll forward');
 
         $today = new \DateTimeImmutable('today');
         $date  = new \DateTimeImmutable($row['renewal_date']);
