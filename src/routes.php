@@ -158,6 +158,8 @@ $router->post('/email/campaigns/(\d+)/recipients/(\d+)/retry', function ($id, $r
 foreach (['draft','pause','resume','cancel'] as $emailAction) {
     $router->post('/email/campaigns/(\d+)/' . $emailAction, function ($id) use ($db, $emailAction) { (new CoyshCRM\Controllers\EmailController($db))->campaignAction((int)$id, $emailAction); });
 }
+$router->post('/settings/notifications', function () use ($db) { (new CoyshCRM\Controllers\SettingsController($db))->saveNotifications(); });
+$router->post('/settings/notifications/test', function () use ($db) { (new CoyshCRM\Controllers\SettingsController($db))->testDigest(); });
 $router->get('/settings/email', function () use ($db) { (new CoyshCRM\Controllers\EmailController($db))->settings(); });
 $router->post('/settings/email', function () use ($db) { (new CoyshCRM\Controllers\EmailController($db))->saveSettings(); });
 $router->post('/settings/email/verify', function () use ($db) { (new CoyshCRM\Controllers\EmailController($db))->verifySettings(); });

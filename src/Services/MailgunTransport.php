@@ -41,6 +41,26 @@ final class MailgunTransport implements EmailTransport
         return ['id' => trim($response->getId(), '<>'), 'message' => $response->getMessage()];
     }
 
+    /**
+     * Internal mail to the CRM owner (digest, alerts): no tracking, no
+     * marketing tag, no List-Unsubscribe — it isn't a marketing message.
+     *
+     * @return array{id:string,message:string}
+     */
+    public function sendSystem(string $to, string $subject, string $html, string $text): array
+    {
+        if (empty($this->config['sending_domain'])) throw new RuntimeException('Mailgun sending domain is missing.');
+        $fromEmail = $this->config['from_email'] ?: 'crm@' . $this->config['sending_domain'];
+        $params = [
+            'from' => 'Coysh CRM <' . $fromEmail . '>',
+            'to' => $to, 'subject' => $subject, 'html' => $html, 'text' => $text,
+            'o:tracking' => 'no',
+            'o:tag' => ['crm-system'],
+        ];
+        $response = $this->client->messages()->send($this->config['sending_domain'], $params);
+        return ['id' => trim($response->getId(), '<>'), 'message' => $response->getMessage()];
+    }
+
     public function verify(): bool
     {
         if (empty($this->config['sending_domain'])) return false;

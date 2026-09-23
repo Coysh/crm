@@ -9,7 +9,7 @@
         };
         $stateStyle = [
             'ok'      => ['bg-green-100 text-green-700', 'OK'],
-            'skipped' => ['bg-slate-100 text-slate-500', 'Not connected'],
+            'skipped' => ['bg-slate-100 text-slate-500', 'Skipped'],
             'running' => ['bg-blue-100 text-blue-700', 'Running'],
             'failed'  => ['bg-red-100 text-red-700', 'Failed'],
             'stale'   => ['bg-amber-100 text-amber-700', 'Stale'],
@@ -42,7 +42,7 @@
                 <tr>
                     <td class="px-5 py-2"><a href="<?= e($j['url']) ?>" class="text-slate-800 hover:text-accent-600"><?= e($j['label']) ?></a></td>
                     <td class="px-3 py-2 text-xs text-slate-500 whitespace-nowrap"><?= e($j['schedule']) ?></td>
-                    <td class="px-3 py-2"><span class="inline-block px-1.5 py-0.5 rounded text-xs font-medium <?= $cls ?>"><?= $lbl ?></span></td>
+                    <td class="px-3 py-2"><span class="inline-block px-1.5 py-0.5 rounded text-xs font-medium <?= $cls ?>" title="<?= e($lastLine($j['last_run']['output'] ?? '')) ?>"><?= $lbl ?></span></td>
                     <td class="px-3 py-2 text-xs text-slate-500 whitespace-nowrap"><?= $j['last_ok_at'] ? e($ago($j['last_ok_at'])) : '—' ?></td>
                     <td class="px-5 py-2 text-xs text-red-600">
                         <?php if ($j['last_failure']): ?>
@@ -54,6 +54,46 @@
             </tbody>
         </table>
         </div>
+    </div>
+
+    <div class="bg-white border border-slate-200 rounded-lg p-6 scroll-mt-4" id="notifications">
+        <div class="flex items-start justify-between gap-4">
+            <div>
+                <h2 class="text-sm font-semibold text-slate-700">Notifications</h2>
+                <p class="text-sm text-slate-500 mt-1">A morning email of everything on <a href="/today" class="text-accent-600 hover:underline">Today</a>, and an immediate email when a monitored site goes down. Sent through Mailgun.</p>
+            </div>
+            <?php if (!empty($notifyCfg['last_digest_at'])): ?>
+                <span class="text-xs text-slate-400 whitespace-nowrap">Last digest <?= e($ago($notifyCfg['last_digest_at'])) ?></span>
+            <?php endif ?>
+        </div>
+        <?php if (!$mailgunReady): ?>
+            <p class="mt-3 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded px-3 py-2">Mailgun isn't configured yet — set the API key and sending domain in <a href="/settings/email" class="underline">Email Marketing</a> first.</p>
+        <?php endif ?>
+        <form method="POST" action="/settings/notifications" class="mt-4 grid sm:grid-cols-2 gap-4 text-sm">
+            <?= csrfField() ?>
+            <label class="block">
+                <span class="block font-medium text-slate-700 mb-1">Send to</span>
+                <input type="email" name="recipient" value="<?= e($notifyCfg['recipient'] ?? '') ?>" placeholder="you@example.com"
+                       class="w-full border border-slate-300 rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent-500">
+            </label>
+            <label class="block">
+                <span class="block font-medium text-slate-700 mb-1">Digest time (UK)</span>
+                <select name="digest_time" class="w-full border border-slate-300 rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent-500">
+                    <?php for ($m = 5 * 60; $m <= 10 * 60; $m += 30): $t = sprintf('%02d:%02d', intdiv($m, 60), $m % 60); ?>
+                        <option value="<?= $t ?>" <?= ($notifyCfg['digest_time'] ?? '07:30') === $t ? 'selected' : '' ?>><?= $t ?></option>
+                    <?php endfor ?>
+                </select>
+            </label>
+            <div class="sm:col-span-2 space-y-2">
+                <label class="flex items-center gap-2"><input type="checkbox" name="digest_enabled" value="1" <?= !empty($notifyCfg['digest_enabled']) ? 'checked' : '' ?>> Daily digest (skipped when nothing is urgent or due this week)</label>
+                <label class="flex items-center gap-2"><input type="checkbox" name="include_low" value="1" <?= !empty($notifyCfg['include_low']) ? 'checked' : '' ?>> Include housekeeping items in the digest</label>
+                <label class="flex items-center gap-2"><input type="checkbox" name="site_down_alerts" value="1" <?= !empty($notifyCfg['site_down_alerts']) ? 'checked' : '' ?>> Email me as soon as a monitored site goes down (once per outage)</label>
+            </div>
+            <div class="sm:col-span-2 flex items-center gap-3">
+                <button type="submit" class="px-3 py-1.5 bg-accent-600 text-white rounded text-sm hover:bg-accent-700">Save</button>
+                <button type="submit" formaction="/settings/notifications/test" class="px-3 py-1.5 border border-slate-300 rounded text-sm hover:bg-slate-50" <?= $mailgunReady && !empty($notifyCfg['recipient']) ? '' : 'disabled' ?>>Send digest now</button>
+            </div>
+        </form>
     </div>
 
     <div class="grid md:grid-cols-2 gap-4">

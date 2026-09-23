@@ -23,6 +23,7 @@ class JobRunner
     public const JOBS = [
         'email-campaigns' => ['label' => 'Email campaigns', 'script' => 'email-campaigns.php', 'every' => 60,   'stale' => 900,    'url' => '/email'],
         'uptime-kuma'     => ['label' => 'Uptime Kuma',     'script' => 'uptime-kuma-sync.php', 'every' => 300,  'stale' => 1800,   'url' => '/settings/uptime-kuma'],
+        'notifications'   => ['label' => 'Digest & alerts', 'script' => 'notify.php',           'every' => 300,  'stale' => 3600,   'url' => '/settings#notifications'],
         'freeagent'       => ['label' => 'FreeAgent',       'script' => 'freeagent-sync.php',   'every' => 3600, 'stale' => 14400,  'url' => '/settings/freeagent'],
         'ploi'            => ['label' => 'Ploi',            'script' => 'ploi-sync.php',        'every' => 3600, 'stale' => 14400,  'url' => '/settings/ploi'],
         'wpmgr'           => ['label' => 'WPMGR',           'script' => 'wpmgr-sync.php',       'every' => 3600, 'stale' => 14400,  'url' => '/settings/wpmgr'],

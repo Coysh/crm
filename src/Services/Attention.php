@@ -66,6 +66,8 @@ class Attention
         $today   = date('Y-m-d');
         $out     = [];
         foreach ($items as $item) {
+            // Some sources (invoices, renewals) also emit low items; drop them here.
+            if (!$includeLow && $item['severity'] === 'low') continue;
             $snoozed = array_key_exists($item['key'], $snoozes)
                 && ($snoozes[$item['key']] === null || $snoozes[$item['key']] > $today);
             if ($snoozed && !$includeSnoozed) continue;
@@ -121,7 +123,8 @@ class Attention
 
     // ── Sources ─────────────────────────────────────────────────────────────
 
-    private function sitesDown(): array
+    /** Also used directly by Notifier for immediate alerts. */
+    public function sitesDown(): array
     {
         if (!(new Client($this->db))->uptimeMonitoringActive()) return [];
 
