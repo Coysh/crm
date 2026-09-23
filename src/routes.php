@@ -115,6 +115,9 @@ $router->get('/', function () use ($db) {
     (new CoyshCRM\Controllers\DashboardController($db))->index();
 });
 
+// ── Global search (sidebar box) ────────────────────────────────────────────
+$router->get('/search', function () use ($db) { (new CoyshCRM\Controllers\SearchController($db))->search(); });
+
 // ── Today (attention list) ─────────────────────────────────────────────────
 $router->get('/today', function () use ($db) { (new CoyshCRM\Controllers\AttentionController($db))->today(); });
 $router->post('/attention/snooze', function () use ($db) { (new CoyshCRM\Controllers\AttentionController($db))->snooze(); });
@@ -176,6 +179,9 @@ $router->get('/sites/create', function () use ($db) {
 $router->post('/sites', function () use ($db) {
     (new CoyshCRM\Controllers\SiteController($db))->store();
 });
+$router->post('/sites/bulk-client', function () use ($db) {
+    (new CoyshCRM\Controllers\SiteController($db))->bulkUpdateClient();
+});
 $router->post('/sites/bulk-server', function () use ($db) {
     (new CoyshCRM\Controllers\SiteController($db))->bulkUpdateServer();
 });
@@ -222,6 +228,9 @@ $router->get('/clients/(\d+)/edit', function ($id) use ($db) {
 });
 $router->post('/clients/(\d+)', function ($id) use ($db) {
     (new CoyshCRM\Controllers\ClientController($db))->update((int)$id);
+});
+$router->post('/clients/(\d+)/notes', function ($id) use ($db) {
+    (new CoyshCRM\Controllers\ClientController($db))->addNote((int)$id);
 });
 $router->post('/clients/(\d+)/archive', function ($id) use ($db) {
     (new CoyshCRM\Controllers\ClientController($db))->archive((int)$id);
@@ -523,6 +532,9 @@ $router->post('/settings/ploi/sync-domains', function () use ($db) {
 });
 $router->post('/settings/ploi/exclusions/(\d+)/remove', function ($id) use ($db) {
     (new CoyshCRM\Controllers\SettingsController($db))->removePloiExclusion((int)$id);
+});
+$router->post('/settings/data-quality/fix', function () use ($db) {
+    (new CoyshCRM\Controllers\DataQualityController($db))->fix();
 });
 $router->get('/settings/data-quality', function () use ($db) {
     (new CoyshCRM\Controllers\DataQualityController($db))->index();

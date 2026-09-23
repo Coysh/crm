@@ -876,6 +876,56 @@ class Client extends Model
         return $result;
     }
 
+    /**
+     * Append a dated line to the client's notes (never overwrites).
+     * Shared by the client page's "Add note" and the MCP add_client_note tool.
+     */
+    public function appendNote(int $clientId, string $note, string $via = ''): string
+    {
+        $client   = $this->findById($clientId) ?: throw new \InvalidArgumentException('Client not found');
+        $stamped  = '[' . date('Y-m-d') . ($via !== '' ? " via {$via}" : '') . '] ' . mb_substr(trim($note), 0, 2000);
+        $existing = trim((string)($client['notes'] ?? ''));
+        $combined = $existing === '' ? $stamped : $existing . "\n\n" . $stamped;
+        $this->query("UPDATE clients SET notes = ?, updated_at = datetime('now') WHERE id = ?", [$combined, $clientId]);
+        return $stamped;
+    }
+
+    /**
+     * What archiving a client would leave behind: active sites and domains
+     * (which keep counting in server-cost splits and renewals) and recurring
+     * cost links (whose share otherwise silently drops out of the P&L).
+     *
+     * @return array{sites:int, domains:int, cost_links:int}
+     */
+    public function archiveImpact(int $clientId): array
+    {
+        $count = fn(string $sql) => (int)$this->query($sql, [$clientId])->fetchColumn();
+        return [
+            'sites'      => $count("SELECT COUNT(*) FROM client_sites WHERE client_id = ?" . $this->siteStatusFilter('client_sites')),
+            'domains'    => $count("SELECT COUNT(*) FROM domains WHERE client_id = ? AND COALESCE(status, 'active') = 'active'"),
+            'cost_links' => $count("SELECT COUNT(*) FROM recurring_cost_clients WHERE client_id = ?"),
+        ];
+    }
+
+    /** Archive a client's sites and domains and unlink it from shared costs. */
+    public function archiveRelated(int $clientId): array
+    {
+        $impact = $this->archiveImpact($clientId);
+        $this->db->beginTransaction();
+        try {
+            if ($this->hasSiteStatusColumn()) {
+                $this->query("UPDATE client_sites SET status = 'archived' WHERE client_id = ? AND COALESCE(status, 'active') = 'active'", [$clientId]);
+            }
+            $this->query("UPDATE domains SET status = 'archived' WHERE client_id = ? AND COALESCE(status, 'active') = 'active'", [$clientId]);
+            $this->query("DELETE FROM recurring_cost_clients WHERE client_id = ?", [$clientId]);
+            $this->db->commit();
+        } catch (\Throwable $e) {
+            $this->db->rollBack();
+            throw $e;
+        }
+        return $impact;
+    }
+
     public function getAllTimePL(int $clientId): array
     {
         // Total invoiced (all sources, all time) — paid + sent + overdue

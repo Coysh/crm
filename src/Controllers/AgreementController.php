@@ -137,7 +137,7 @@ class AgreementController
             }
             flash('success', $msg);
         }
-        redirect("/clients/$clientId");
+        redirect("/clients/$clientId#agreements");
     }
 
     public function deleteWork(int $clientId, int $agreementId, int $logId): void

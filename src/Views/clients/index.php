@@ -351,11 +351,15 @@ function sortLink(string $col, string $label, array $filters, string $sortBase):
 <script>
 // ── Individual actions ──────────────────────────────────────────────────────
 
+const CASCADE_QUESTION = 'Also archive their sites and domains, and remove them from shared recurring costs?\n\nRecommended — otherwise their server-cost share silently drops out of the P&L and their domains keep appearing in renewals.';
+
 function archiveClient(id, name) {
     if (!confirm('Archive "' + name + '"? They will be moved to the archived list.')) return;
+    const cascade = confirm(CASCADE_QUESTION);
     fetch('/clients/' + id + '/archive', {
         method: 'POST',
-        headers: {'X-Requested-With': 'XMLHttpRequest'}
+        headers: {'X-Requested-With': 'XMLHttpRequest'},
+        body: new URLSearchParams(cascade ? {cascade: '1'} : {})
     })
     .then(r => r.json())
     .then(data => {
@@ -437,10 +441,16 @@ function bulkAction(action) {
 
     const label = action === 'archive' ? 'Archive' : 'Restore';
     if (!confirm(label + ' ' + ids.length + ' client' + (ids.length !== 1 ? 's' : '') + '?')) return;
+    const cascade = action === 'archive' && confirm(CASCADE_QUESTION);
 
     const form = document.createElement('form');
     form.method = 'POST';
     form.action = '/clients/bulk-' + action;
+    if (cascade) {
+        const c = document.createElement('input');
+        c.type = 'hidden'; c.name = 'cascade'; c.value = '1';
+        form.appendChild(c);
+    }
     ids.forEach(id => {
         const inp = document.createElement('input');
         inp.type = 'hidden';

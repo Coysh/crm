@@ -27,6 +27,13 @@
             <span class="block text-slate-400 text-xs mt-0.5">CRM</span>
         </div>
 
+        <!-- Global search (public/js/search.js); "/" focuses it -->
+        <div class="relative px-3 pt-3">
+            <input id="global-search" type="search" autocomplete="off" placeholder="Search…  /" aria-label="Search clients, domains, sites, projects"
+                   class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-1.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-accent-500">
+            <div id="global-search-results" class="hidden absolute left-3 top-full mt-1 w-80 max-w-[calc(100vw-2rem)] max-h-[70vh] overflow-y-auto bg-white border border-slate-200 rounded-lg shadow-xl z-50 py-1"></div>
+        </div>
+
         <?php
         $currentPath = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
 
@@ -189,6 +196,7 @@
 </div>
 
 <script src="/js/attention.js"></script>
+<script src="/js/search.js"></script>
 <?php if (!empty($includeQuill)): ?>
     <script src="/js/quill.min.js"></script>
 <?php endif ?>

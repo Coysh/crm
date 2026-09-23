@@ -439,11 +439,7 @@ class McpTools
         $note = trim((string)($args['note'] ?? ''));
         if ($note === '') throw new \InvalidArgumentException('note is required');
 
-        $stamped  = '[' . date('Y-m-d') . ' via MCP] ' . mb_substr($note, 0, 2000);
-        $existing = trim((string)($client['notes'] ?? ''));
-        $combined = $existing === '' ? $stamped : $existing . "\n\n" . $stamped;
-
-        $this->db->prepare("UPDATE clients SET notes = ?, updated_at = datetime('now') WHERE id = ?")->execute([$combined, $id]);
+        $stamped = $this->clients->appendNote($id, $note, 'MCP');
 
         return ['client' => $client['name'], 'note_added' => $stamped];
     }

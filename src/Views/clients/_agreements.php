@@ -111,8 +111,10 @@ $typeLabels = \CoyshCRM\Models\Agreement::TYPES;
                                 <div class="h-1.5 rounded-full <?= $barColour ?>" style="width: <?= $pct ?>%"></div>
                             </div>
                         </div>
+                    <?php endif ?>
 
-                        <!-- Quick-add work log -->
+                    <?php if ($a['status'] === 'active'): ?>
+                        <!-- Quick-add work log (any active agreement; hours only count against an allowance when one is set) -->
                         <form method="POST" action="/clients/<?= $client['id'] ?>/agreements/<?= $a['id'] ?>/work"
                               class="flex flex-wrap items-end gap-2">
                             <?= csrfField() ?>
@@ -133,6 +135,7 @@ $typeLabels = \CoyshCRM\Models\Agreement::TYPES;
                             </div>
                             <button class="px-3 py-1 bg-accent-600 text-white text-xs rounded hover:bg-accent-700">Log Work</button>
                         </form>
+                    <?php endif ?>
 
                         <?php if (!empty($a['work_log'])): ?>
                             <details class="text-xs">
@@ -157,7 +160,6 @@ $typeLabels = \CoyshCRM\Models\Agreement::TYPES;
                                 </table>
                             </details>
                         <?php endif ?>
-                    <?php endif ?>
 
                     <?php if (!empty($a['attachments'])): ?>
                         <div class="flex flex-wrap gap-2 text-xs">

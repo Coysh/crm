@@ -56,9 +56,11 @@ if (isset($db)) {
             </span>
             <a href="/clients/<?= $client['id'] ?>/edit" class="px-3 py-1.5 text-sm border border-slate-300 rounded hover:bg-slate-50">Edit</a>
             <a href="/clients/<?= $client['id'] ?>/merge" class="px-3 py-1.5 text-sm border border-slate-300 rounded hover:bg-slate-50 text-slate-600">Merge…</a>
-            <form method="POST" action="/clients/<?= $client['id'] ?>/archive" class="inline">
+            <form method="POST" action="/clients/<?= $client['id'] ?>/archive" class="inline" id="archive-form"
+                  data-impact="<?= e(json_encode($archiveImpact ?? [])) ?>">
+                <input type="hidden" name="cascade" value="1" disabled>
                 <button type="submit"
-                        onclick="return confirm('<?= $client['status'] === 'active' ? 'Archive this client?' : 'Restore this client?' ?>')"
+                        onclick="return confirmClientArchive(this.form, <?= $client['status'] === 'active' ? 'true' : 'false' ?>)"
                         class="px-3 py-1.5 text-sm border border-slate-300 rounded hover:bg-slate-50 text-slate-600">
                     <?= $client['status'] === 'active' ? 'Archive' : 'Restore' ?>
                 </button>
@@ -73,8 +75,17 @@ if (isset($db)) {
         </div>
     </div>
 
+    <!-- Jump links -->
+    <nav class="sticky top-0 z-20 -mx-6 px-6 py-2 bg-slate-50 border-b border-slate-200 flex flex-wrap gap-x-4 gap-y-1 text-xs" aria-label="Sections">
+        <?php foreach (['health' => 'Health', 'agreements' => 'Agreements', 'pl' => 'P&L', 'notes' => 'Notes', 'domains' => 'Domains',
+                        'sites' => 'Sites', 'income' => 'Income', 'projects' => 'Projects', 'expenses' => 'Expenses',
+                        'attachments' => 'Files', 'freeagent' => 'Invoices'] as $anchor => $label): ?>
+            <a href="#<?= $anchor ?>" class="text-slate-500 hover:text-accent-600"><?= e($label) ?></a>
+        <?php endforeach ?>
+    </nav>
+
     <!-- Client Health Card -->
-    <div id="health" class="scroll-mt-4"></div>
+    <div id="health" class="scroll-mt-12"></div>
     <?php
     $healthStatusBadge = match($health['status']) {
         'healthy'   => 'bg-green-100 text-green-700',
@@ -130,17 +141,30 @@ if (isset($db)) {
             </span>
         </div>
         <ul class="divide-y divide-slate-100">
+            <?php
+            // Where to go to fix each failed check.
+            $fixLinks = [
+                'loss_making' => '#pl', 'no_recent_invoice' => '#freeagent', 'overdue_invoices' => '#freeagent',
+                'no_retainer' => '#income', 'incomplete_setup' => '#sites', 'agreement_renewal_overdue' => '#agreements',
+                'hours_exhausted' => '#agreements', 'site_down' => '#sites', 'site_unmonitored' => '#sites',
+                'no_agreement' => '/clients/' . (int)$client['id'] . '/agreements/create',
+            ];
+            ?>
             <?php foreach ($checks as [$key, $pass, $okMsg, $failMsg]): ?>
             <li class="px-5 py-2.5 flex items-center gap-3 text-sm">
                 <span class="shrink-0 <?= $pass ? 'text-green-500' : 'text-red-500' ?>"><?= $pass ? '✓' : '✗' ?></span>
-                <span class="<?= $pass ? 'text-slate-600' : 'text-red-700' ?>"><?= $pass ? $okMsg : $failMsg ?></span>
+                <?php if ($pass): ?>
+                    <span class="text-slate-600"><?= $okMsg ?></span>
+                <?php else: ?>
+                    <a href="<?= e($fixLinks[$key] ?? '#health') ?>" class="text-red-700 hover:underline"><?= $failMsg ?> →</a>
+                <?php endif ?>
             </li>
             <?php endforeach ?>
         </ul>
     </div>
 
     <!-- Agreements & SLAs -->
-    <div id="agreements" class="scroll-mt-4"></div>
+    <div id="agreements" class="scroll-mt-12"></div>
     <?php
     $agreements = $client['agreements'] ?? [];
     include VIEW_PATH . '/clients/_agreements.php';
@@ -205,7 +229,7 @@ if (isset($db)) {
     </div>
 
     <!-- P&L Breakdown -->
-    <div id="pl" class="scroll-mt-4 bg-white border border-slate-200 rounded-lg overflow-hidden">
+    <div id="pl" class="scroll-mt-12 bg-white border border-slate-200 rounded-lg overflow-hidden">
         <div class="px-5 py-3 border-b border-slate-200 flex items-center justify-between">
             <h2 class="text-sm font-semibold text-slate-700">Monthly Profit / Loss</h2>
             <span class="text-sm font-semibold <?= $pColor ?>"><?= money($pl['profit']) ?> / mo &nbsp;·&nbsp; <?= number_format($pl['margin'], 1) ?>% margin</span>
@@ -298,14 +322,24 @@ if (isset($db)) {
         </div>
     </div>
 
-    <?php if ($client['notes']): ?>
-        <div class="bg-amber-50 border border-amber-200 rounded p-4 text-sm text-amber-800">
-            <?= nl2br(e($client['notes'])) ?>
-        </div>
-    <?php endif ?>
+    <!-- Notes -->
+    <section id="notes" class="scroll-mt-12 space-y-2">
+        <h2 class="text-sm font-semibold text-slate-700">Notes</h2>
+        <?php if ($client['notes']): ?>
+            <div class="bg-amber-50 border border-amber-200 rounded p-4 text-sm text-amber-800">
+                <?= nl2br(e($client['notes'])) ?>
+            </div>
+        <?php endif ?>
+        <form method="POST" action="/clients/<?= (int)$client['id'] ?>/notes" class="flex gap-2">
+            <?= csrfField() ?>
+            <input type="text" name="note" required maxlength="2000" placeholder="Add a dated note — e.g. 'Called about renewal, will confirm Friday'"
+                   class="flex-1 border border-slate-300 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-accent-500">
+            <button class="px-3 py-1.5 bg-accent-600 text-white text-sm rounded hover:bg-accent-700">Add note</button>
+        </form>
+    </section>
 
     <!-- Domains -->
-    <section id="domains" class="scroll-mt-4">
+    <section id="domains" class="scroll-mt-12">
         <div class="flex items-center justify-between mb-2">
             <h2 class="text-sm font-semibold text-slate-700">Domains</h2>
             <a href="/clients/<?= $client['id'] ?>/domains/create" class="text-xs text-accent-600 hover:underline">+ Add Domain</a>
@@ -327,7 +361,7 @@ if (isset($db)) {
                 <tbody class="divide-y divide-slate-100">
                     <?php foreach ($client['domains'] as $d): ?>
                         <tr class="hover:bg-slate-50">
-                            <td class="px-4 py-2 font-mono text-xs"><?= e($d['domain']) ?></td>
+                            <td class="px-4 py-2 font-mono text-xs"><a href="/domains/<?= (int)$d['id'] ?>" class="text-accent-600 hover:underline"><?= e($d['domain']) ?></a></td>
                             <td class="px-4 py-2 text-slate-500"><?= e($d['registrar'] ?: '—') ?></td>
                             <td class="px-4 py-2 text-center"><?= $d['cloudflare_proxied'] ? '<span class="text-orange-500">✓</span>' : '<span class="text-slate-300">—</span>' ?></td>
                             <td class="px-4 py-2 text-slate-500"><?= formatDate($d['renewal_date']) ?></td>
@@ -356,10 +390,9 @@ if (isset($db)) {
     function clientSiteRow(array $s, int $clientId): void { ?>
         <tr class="hover:bg-slate-50 <?= ($s['status'] ?? 'active') === 'archived' ? 'opacity-60' : '' ?>">
             <td class="px-4 py-2 font-mono text-xs">
+                <a href="/sites/<?= (int)$s['id'] ?>" class="text-accent-600 hover:underline"><?= e($s['domain_name'] ?: '—') ?></a>
                 <?php if ($s['git_repo']): ?>
-                    <a href="<?= e($s['git_repo']) ?>" target="_blank" rel="noopener" class="text-accent-600 hover:underline"><?= e($s['domain_name'] ?: '—') ?></a>
-                <?php else: ?>
-                    <?= e($s['domain_name'] ?: '—') ?>
+                    <a href="<?= e($s['git_repo']) ?>" target="_blank" rel="noopener" class="ml-1 text-slate-400 hover:text-slate-700 font-sans" title="Git repository">repo ↗</a>
                 <?php endif ?>
             </td>
             <td class="px-4 py-2"><?= e($s['website_stack'] ?: '—') ?></td>
@@ -430,7 +463,7 @@ if (isset($db)) {
         </thead>
     <?php }
     ?>
-    <section id="sites" class="scroll-mt-4">
+    <section id="sites" class="scroll-mt-12">
         <div class="flex items-center justify-between mb-2">
             <h2 class="text-sm font-semibold text-slate-700">Sites</h2>
             <a href="/clients/<?= $client['id'] ?>/sites/create" class="text-xs text-accent-600 hover:underline">+ Add Site</a>
@@ -468,7 +501,7 @@ if (isset($db)) {
     </section>
 
     <!-- Recurring Income -->
-    <section id="income" class="scroll-mt-4">
+    <section id="income" class="scroll-mt-12">
         <div class="flex items-center justify-between mb-2">
             <h2 class="text-sm font-semibold text-slate-700">Recurring Income</h2>
             <span class="text-xs text-slate-400">From FreeAgent · read-only</span>
@@ -541,7 +574,7 @@ if (isset($db)) {
     </section>
 
     <!-- Projects -->
-    <section id="projects" class="scroll-mt-4">
+    <section id="projects" class="scroll-mt-12">
         <div class="flex items-center justify-between mb-2">
             <h2 class="text-sm font-semibold text-slate-700">Projects</h2>
             <a href="/projects/create?client_id=<?= $client['id'] ?>" class="text-xs text-accent-600 hover:underline">+ Add Project</a>
@@ -611,7 +644,7 @@ if (isset($db)) {
     </section>
 
     <!-- Expenses -->
-    <section id="expenses" class="scroll-mt-4">
+    <section id="expenses" class="scroll-mt-12">
         <div class="flex items-center justify-between mb-2">
             <h2 class="text-sm font-semibold text-slate-700">Expenses</h2>
             <a href="/expenses/create?client_id=<?= (int)$client['id'] ?>" class="text-xs text-accent-600 hover:underline">+ Add Expense</a>
@@ -656,7 +689,7 @@ if (isset($db)) {
 
 
     <!-- Attachments -->
-    <section id="attachments" class="scroll-mt-4">
+    <section id="attachments" class="scroll-mt-12">
         <div class="flex items-center justify-between mb-2"><h2 class="text-sm font-semibold text-slate-700">PDF Attachments</h2></div>
         <form method="POST" enctype="multipart/form-data" action="/clients/<?= $client['id'] ?>/attachments" class="bg-white border border-slate-200 rounded-lg p-4 flex flex-wrap gap-2 items-center">
             <select name="type" class="border rounded px-2 py-1 text-sm"><option value="proposal">Proposal</option><option value="contract">Contract</option><option value="agreement">Agreement</option></select>
@@ -682,7 +715,7 @@ if (isset($db)) {
 
     <!-- FreeAgent Data -->
     <?php if ($faConnected): ?>
-    <section id="freeagent" class="scroll-mt-4">
+    <section id="freeagent" class="scroll-mt-12">
         <div class="flex items-center justify-between mb-2">
             <h2 class="text-sm font-semibold text-slate-700">FreeAgent</h2>
             <?php if (!$faContact): ?>
@@ -829,3 +862,23 @@ if (isset($db)) {
     <?php endif ?>
 
 </div>
+
+<script>
+// Archiving offers to take the client's sites/domains/cost links with it.
+function confirmClientArchive(form, archiving) {
+    if (!archiving) return confirm('Restore this client?');
+    if (!confirm('Archive this client?')) return false;
+    const impact = JSON.parse(form.dataset.impact || '{}');
+    const parts = [];
+    if (impact.sites) parts.push(impact.sites + ' active site' + (impact.sites === 1 ? '' : 's'));
+    if (impact.domains) parts.push(impact.domains + ' domain' + (impact.domains === 1 ? '' : 's'));
+    if (impact.cost_links) parts.push(impact.cost_links + ' recurring-cost link' + (impact.cost_links === 1 ? '' : 's'));
+    if (parts.length) {
+        form.elements.cascade.disabled = !confirm(
+            'Also archive ' + parts.join(', ') + '?\n\nRecommended — otherwise their server-cost share silently drops out '
+            + 'of the P&L and their domains keep appearing in renewals. (Cost links are removed, not archived.)'
+        );
+    }
+    return true;
+}
+</script>

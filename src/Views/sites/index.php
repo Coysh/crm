@@ -346,6 +346,19 @@ function tableHeader(bool $ploiConnected, bool $wpmgrConnected, bool $kumaConnec
                 class="px-3 py-1.5 bg-accent-600 hover:bg-accent-700 rounded text-sm font-medium">
             Move
         </button>
+
+        <span class="text-slate-400 ml-2">→ assign to</span>
+        <select name="client_id" id="site-bulk-client"
+                class="border border-slate-600 bg-slate-700 text-white rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-accent-500">
+            <option value="">— Select client —</option>
+            <?php foreach ($allClients as $cl): ?>
+                <option value="<?= (int)$cl['id'] ?>"><?= e($cl['name']) ?></option>
+            <?php endforeach ?>
+        </select>
+        <button type="submit" id="site-bulk-assign" formaction="/sites/bulk-client" formnovalidate
+                class="px-3 py-1.5 bg-accent-600 hover:bg-accent-700 rounded text-sm font-medium">
+            Assign
+        </button>
         <button type="button" onclick="clearSiteSelection()"
                 class="text-slate-300 hover:text-white text-xs ml-auto">Clear selection</button>
     </form>
@@ -471,6 +484,15 @@ document.getElementById('site-bulk-form').addEventListener('submit', function(e)
     const sel = document.getElementById('site-bulk-server');
     const ids = getCheckedSiteIds();
     if (!ids.length) { e.preventDefault(); return; }
+
+    // The same bar also assigns a client (Assign button → /sites/bulk-client).
+    if (e.submitter && e.submitter.id === 'site-bulk-assign') {
+        const cSel = document.getElementById('site-bulk-client');
+        if (!cSel.value) { e.preventDefault(); alert('Choose a client first.'); return; }
+        const n = ids.length + ' site' + (ids.length !== 1 ? 's' : '');
+        if (!confirm('Assign ' + n + ' (and their domains) to ' + cSel.options[cSel.selectedIndex].text + '?')) e.preventDefault();
+        return;
+    }
 
     const label = sel.options[sel.selectedIndex].text;
     if (!confirm('Move ' + ids.length + ' site' + (ids.length !== 1 ? 's' : '') + ' to ' + label + '?')) {
