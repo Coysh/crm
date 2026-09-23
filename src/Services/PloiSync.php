@@ -594,6 +594,7 @@ class PloiSync
                 $this->db->prepare("UPDATE ploi_sites SET client_site_id = ? WHERE client_site_id = ?")
                     ->execute([$keep, $drop]);
                 $this->repointCostLinks($keep, $drop);
+                $this->repointSiteLinks($keep, $drop);
                 $this->deleteClientSite($drop, $pair['domain'], 'Merged into the CRM site record kept for this domain');
 
                 if ($pair['crm_server_id']) {
@@ -699,8 +700,22 @@ class PloiSync
 
             $summary['ploi_sites'] = (int)$this->db->exec("DELETE FROM ploi_sites WHERE is_stale = 1");
 
-            $staleServers = $this->db->query("SELECT id, ploi_id, name, server_id FROM ploi_servers WHERE is_stale = 1")->fetchAll();
-            $summary['ploi_servers'] = (int)$this->db->exec("DELETE FROM ploi_servers WHERE is_stale = 1");
+            // A stale server can't go while a live Ploi site still points at it.
+            $staleServers = $this->db->query(
+                "SELECT id, ploi_id, name, server_id FROM ploi_servers
+                 WHERE is_stale = 1 AND id NOT IN (SELECT ploi_server_id FROM ploi_sites WHERE ploi_server_id IS NOT NULL)"
+            )->fetchAll();
+            $held = $this->db->query(
+                "SELECT name FROM ploi_servers
+                 WHERE is_stale = 1 AND id IN (SELECT ploi_server_id FROM ploi_sites WHERE ploi_server_id IS NOT NULL)"
+            )->fetchAll(PDO::FETCH_COLUMN);
+            foreach ($held as $name) {
+                $summary['notes'][] = "Kept stale Ploi server \"$name\" — live Ploi sites still reference it; re-run a sync first.";
+            }
+            if ($staleServers) {
+                $in = implode(',', array_map(fn($r) => (int)$r['id'], $staleServers));
+                $summary['ploi_servers'] = (int)$this->db->exec("DELETE FROM ploi_servers WHERE id IN ($in)");
+            }
 
             if ($removeCrmServers) {
                 foreach ($staleServers as $srv) {
@@ -757,6 +772,7 @@ class PloiSync
             $this->db->prepare("UPDATE ploi_sites SET client_site_id = ? WHERE client_site_id = ?")
                 ->execute([$oldCs, $newCs]);
             $this->repointCostLinks($oldCs, $newCs);
+            $this->repointSiteLinks($oldCs, $newCs);
             // …so nothing references it by the time it goes.
             $this->deleteClientSite($newCs, (string)$successor['domain'], 'Merged into the existing CRM site record');
         } else {
@@ -819,6 +835,22 @@ class PloiSync
         } catch (Throwable) {}
     }
 
+    /**
+     * Move monitoring links (WPMGR, Uptime Kuma) off the record that is about
+     * to go. Both reference client_sites without ON DELETE, so leaving them
+     * would make the delete fail on the foreign key.
+     */
+    private function repointSiteLinks(int $keepId, int $dropId): void
+    {
+        foreach (['wpmgr_sites', 'uptime_kuma_monitors'] as $table) {
+            try {
+                $this->db->prepare("UPDATE $table SET client_site_id = ? WHERE client_site_id = ?")->execute([$keepId, $dropId]);
+            } catch (Throwable) {
+                // Integration's migration not applied — nothing to move.
+            }
+        }
+    }
+
     private function deleteClientSite(int $id, string $domain, string $reason): void
     {
         $this->db->prepare(
@@ -827,6 +859,18 @@ class PloiSync
         )->execute([$id, $domain !== '' ? $domain : ('Site #' . $id), json_encode(['reason' => $reason])]);
 
         $this->db->prepare("UPDATE ploi_sites SET client_site_id = NULL WHERE client_site_id = ?")->execute([$id]);
+        // Unlink monitoring rows too (no ON DELETE on these FKs); their next
+        // sync re-matches by domain. A manual Kuma link is cleared with it.
+        try {
+            $this->db->prepare("UPDATE wpmgr_sites SET client_site_id = NULL WHERE client_site_id = ?")->execute([$id]);
+        } catch (Throwable) {}
+        try {
+            $this->db->prepare("UPDATE uptime_kuma_monitors SET client_site_id = NULL, link_is_manual = 0 WHERE client_site_id = ?")->execute([$id]);
+        } catch (Throwable) {
+            try {
+                $this->db->prepare("UPDATE uptime_kuma_monitors SET client_site_id = NULL WHERE client_site_id = ?")->execute([$id]);
+            } catch (Throwable) {}
+        }
         $this->db->prepare("DELETE FROM client_sites WHERE id = ?")->execute([$id]);
     }
 
