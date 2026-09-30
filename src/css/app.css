@@ -1,3 +1,10 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* Email builder rich text (editor + live preview): the base reset strips list and
+   link styling, which made the List and Link buttons look like they did nothing. */
+.email-rich ul { list-style: disc; margin: 0 0 1em; padding-left: 1.75em; }
+.email-rich ol { list-style: decimal; margin: 0 0 1em; padding-left: 1.75em; }
+.email-rich p { margin: 0 0 1em; }
+.email-rich a { color: #0563c1; text-decoration: underline; }
