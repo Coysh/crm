@@ -61,6 +61,48 @@ final class EmailMarketingTest extends TestCase
         self::assertStringContainsString('https://coysh.digital/contact', $template['content_json']);
     }
 
+    public function testSegmentMembersReportSourceReasonAndHeldOutContacts(): void
+    {
+        $service = new SegmentEvaluator($this->db);
+        $this->db->exec("INSERT INTO clients(id,name,status,contact_name,contact_email,client_type) VALUES(2,'Beta','active','Carol','carol@example.com','managed'); INSERT INTO client_sites(id,client_id,status,website_stack) VALUES(2,2,'active','WordPress'); INSERT INTO marketing_contacts(name,email,email_norm,status,eligibility_basis) VALUES('Carol','carol@example.com','carol@example.com','active','consent'); INSERT INTO marketing_contact_clients(contact_id,client_id,is_primary) VALUES(last_insert_rowid(),2,1);");
+        $carol=(int)$this->db->query("SELECT id FROM marketing_contacts WHERE email_norm='carol@example.com'")->fetchColumn();
+        $this->db->exec("INSERT INTO marketing_contacts(name,email,email_norm,status,eligibility_basis) VALUES('Bob','bob@example.com','bob@example.com','active','unknown')");
+        $bob=(int)$this->db->lastInsertId();
+        $insert=$this->db->prepare('INSERT INTO marketing_segment_members(segment_id,contact_id,action) VALUES(1,?,?)');
+        $insert->execute([$carol,'exclude']);$insert->execute([$bob,'include']);
+
+        $result=$service->members(1);
+        $byEmail=array_column($result['members'],null,'email');
+        self::assertSame(['alice@example.com','bob@example.com'],array_keys($byEmail));
+        self::assertSame('rule',$byEmail['alice@example.com']['source']);
+        self::assertNull($byEmail['alice@example.com']['reason']);
+        self::assertSame('manual',$byEmail['bob@example.com']['source']);
+        self::assertSame('Eligibility not reviewed',$byEmail['bob@example.com']['reason']);
+        self::assertSame(['carol@example.com'],array_column($result['removed'],'email'));
+    }
+
+    public function testPlainStyleDropsBrandingButKeepsUnsubscribe(): void
+    {
+        $this->db->exec("UPDATE email_marketing_config SET business_name='Coysh Digital Ltd', business_address='1 Example Street' WHERE id=1");
+        $content=['style'=>'plain','preheader'=>'Quick note','blocks'=>[
+            ['type'=>'heading','text'=>'Server upgrade','level'=>1],
+            ['type'=>'text','html'=>'<p onclick="bad()">Hi {{name}}</p>'],
+            ['type'=>'button','text'=>'Read more','url'=>'https://coysh.digital'],
+        ]];
+        $rendered=(new EmailRenderer($this->db))->render($content,['name'=>'A & B','company_name'=>'Acme'],'https://crm.test/unsubscribe');
+        self::assertStringNotContainsString('coysh-digital-email-logo', $rendered['html']);
+        self::assertStringNotContainsString('<table', $rendered['html']);
+        self::assertStringNotContainsString('1 Example Street', $rendered['html']);
+        self::assertStringNotContainsString('#a1c63e', $rendered['html']);
+        self::assertStringNotContainsString('onclick', $rendered['html']);
+        self::assertStringContainsString('<strong>Server upgrade</strong>', $rendered['html']);
+        self::assertStringContainsString('Hi A &amp; B', $rendered['html']);
+        self::assertStringContainsString('<a href="https://coysh.digital">Read more</a>', $rendered['html']);
+        self::assertStringContainsString('<a href="https://crm.test/unsubscribe"', $rendered['html']);
+        self::assertStringContainsString('Unsubscribe: https://crm.test/unsubscribe', $rendered['text']);
+        self::assertStringNotContainsString('1 Example Street', $rendered['text']);
+    }
+
     public function testRendererRemovesUnsafeMarkupAndAddsFooter(): void
     {
         $content=['theme'=>[],'blocks'=>[

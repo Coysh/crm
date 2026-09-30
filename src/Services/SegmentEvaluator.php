@@ -9,6 +9,24 @@ use RuntimeException;
 
 final class SegmentEvaluator
 {
+    /** Rule fields and operators with their labels — shared by the rule builder and the members page. */
+    public const FIELDS = [
+        'contact.name' => 'Contact name', 'contact.email' => 'Contact email', 'contact.company_name' => 'Company',
+        'contact.status' => 'Contact status', 'contact.eligibility_basis' => 'Eligibility basis',
+        'client.name' => 'Client name', 'client.status' => 'Client status', 'client.client_type' => 'Client type',
+        'site.status' => 'Site status', 'site.website_stack' => 'Website stack', 'site.css_framework' => 'CSS framework',
+        'site.smtp_service' => 'SMTP service', 'site.server' => 'Server',
+        'domain.registrar' => 'Domain registrar', 'domain.cloudflare' => 'Uses Cloudflare',
+        'agreement.type' => 'Agreement type', 'agreement.status' => 'Agreement status',
+        'agreement.covers_hosting' => 'Agreement covers hosting', 'agreement.covers_support' => 'Agreement covers support',
+        'agreement.covers_maintenance' => 'Agreement covers maintenance',
+    ];
+
+    public const OPERATORS = [
+        'equals' => 'equals', 'not_equals' => 'does not equal', 'contains' => 'contains', 'not_contains' => 'does not contain',
+        'is_empty' => 'is empty', 'is_not_empty' => 'is not empty', 'is_true' => 'is true', 'is_false' => 'is false',
+    ];
+
     public function __construct(private PDO $db) {}
 
     public function contacts(int $segmentId): array
@@ -69,6 +87,31 @@ final class SegmentEvaluator
             else $excluded[] = ['contact' => $contact, 'reason' => $reason];
         }
         return ['included' => $included, 'excluded' => $excluded];
+    }
+
+    /**
+     * The segment as it stands, annotated for display: every member with why it
+     * cannot be sent to (`reason`, null = will receive) and whether a rule or a
+     * manual addition put it there (`source`), plus the rule matches held out by
+     * an exclude override (`removed`).
+     */
+    public function members(int $segmentId): array
+    {
+        $contacts = $this->contacts($segmentId);
+        $candidates = $this->candidates($segmentId);
+        $stmt = $this->db->prepare("SELECT contact_id FROM marketing_segment_members WHERE segment_id = ? AND action = 'exclude'");
+        $stmt->execute([$segmentId]);
+        $excluded = array_flip(array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN)));
+        $ruleIds = array_flip(array_map('intval', array_column($candidates, 'id')));
+
+        $members = [];
+        foreach ($contacts as $contact) {
+            $contact['reason'] = $this->exclusionReason($contact);
+            $contact['source'] = isset($ruleIds[(int)$contact['id']]) ? 'rule' : 'manual';
+            $members[] = $contact;
+        }
+        $removed = array_values(array_filter($candidates, fn($c) => isset($excluded[(int)$c['id']])));
+        return ['members' => $members, 'removed' => $removed];
     }
 
     /** Return the live rule matches before manual include/exclude overrides. */
