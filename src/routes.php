@@ -140,6 +140,7 @@ $router->get('/email/contacts/export', function () use ($db) { (new CoyshCRM\Con
 $router->get('/email/segments', function () use ($db) { (new CoyshCRM\Controllers\EmailController($db))->segments(); });
 $router->get('/email/segments/create', function () use ($db) { (new CoyshCRM\Controllers\EmailController($db))->segmentForm(); });
 $router->post('/email/segments', function () use ($db) { (new CoyshCRM\Controllers\EmailController($db))->saveSegment(); });
+$router->get('/email/segments/(\d+)', function ($id) use ($db) { (new CoyshCRM\Controllers\EmailController($db))->segmentShow((int)$id); });
 $router->get('/email/segments/(\d+)/edit', function ($id) use ($db) { (new CoyshCRM\Controllers\EmailController($db))->segmentForm((int)$id); });
 $router->post('/email/segments/(\d+)', function ($id) use ($db) { (new CoyshCRM\Controllers\EmailController($db))->saveSegment((int)$id); });
 $router->get('/email/templates', function () use ($db) { (new CoyshCRM\Controllers\EmailController($db))->templates(); });

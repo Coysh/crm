@@ -190,14 +190,33 @@ final class EmailController
     public function segments(): void
     {
         $segments=$this->db->query("SELECT s.*,(SELECT COUNT(*) FROM marketing_segment_members m WHERE m.segment_id=s.id AND m.action='include') manual_count FROM marketing_segments s ORDER BY lower(name)")->fetchAll();
-        foreach($segments as &$segment){try{$segment['evaluated_count']=count((new SegmentEvaluator($this->db))->contacts((int)$segment['id']));}catch(\Throwable){$segment['evaluated_count']=0;}} unset($segment);
+        foreach($segments as &$segment){try{$audience=(new SegmentEvaluator($this->db))->audience((int)$segment['id']);$segment['sendable_count']=count($audience['included']);$segment['evaluated_count']=$segment['sendable_count']+count($audience['excluded']);}catch(\Throwable){$segment['evaluated_count']=0;$segment['sendable_count']=0;}} unset($segment);
         render('email.segments',compact('segments'),'Email Segments');
+    }
+
+    public function segmentShow(int $id): void
+    {
+        $segment=$this->row('marketing_segments',$id); if(!$segment){$this->notFound();return;}
+        $members=[];$removed=[];$error=null;
+        try{['members'=>$members,'removed'=>$removed]=(new SegmentEvaluator($this->db))->members($id);}catch(\Throwable $e){$error=$e->getMessage();}
+        usort($members,fn($a,$b)=>strcasecmp($a['name']?:$a['email'],$b['name']?:$b['email']));
+        $clientNames=[];
+        foreach($this->all("SELECT mcc.contact_id, group_concat(c.name, ', ') names FROM marketing_contact_clients mcc JOIN clients c ON c.id=mcc.client_id GROUP BY mcc.contact_id") as $r)$clientNames[(int)$r['contact_id']]=$r['names'];
+        $rules=json_decode((string)$segment['rules_json'],true); if(!is_array($rules))$rules=[];
+        render('email.segment_show',compact('segment','members','removed','clientNames','rules','error'),'Segment: '.$segment['name']);
     }
 
     public function segmentForm(?int $id=null): void
     {
         $segment=$id?$this->row('marketing_segments',$id):['segment_type'=>'manual','match_type'=>'all','rules_json'=>'[]']; if($id&&!$segment){$this->notFound();return;}
-        $contacts=$this->db->query('SELECT id,name,email FROM marketing_contacts ORDER BY lower(email)')->fetchAll();
+        // Active contacts, plus anyone already added to this segment who has since been archived.
+        $contacts=$this->all("SELECT mc.id,mc.name,mc.email,mc.company_name,mc.status,mc.eligibility_basis,mc.unsubscribed_at, group_concat(c.name, ', ') client_names,
+            (SELECT reason FROM marketing_suppressions ms WHERE ms.email_norm=mc.email_norm AND ms.cleared_at IS NULL) suppression_reason
+            FROM marketing_contacts mc
+            LEFT JOIN marketing_contact_clients mcc ON mcc.contact_id=mc.id
+            LEFT JOIN clients c ON c.id=mcc.client_id
+            WHERE mc.status='active' OR mc.id IN (SELECT contact_id FROM marketing_segment_members WHERE segment_id=? AND action='include')
+            GROUP BY mc.id ORDER BY lower(COALESCE(NULLIF(mc.name,''),mc.email))",[(int)$id]);
         $members=$id?$this->all('SELECT contact_id,action FROM marketing_segment_members WHERE segment_id=?',[$id]):[];
         $dynamicCandidates=[];
         if($id&&($segment['segment_type']??'')==='dynamic')try{$dynamicCandidates=(new SegmentEvaluator($this->db))->candidates($id);}catch(\Throwable){}
@@ -220,8 +239,8 @@ final class EmailController
             foreach($includeIds as $contactId)$insert->execute([$id,$contactId,'include']);
             foreach($excludeIds as $contactId)$insert->execute([$id,$contactId,'exclude']);
             (new SegmentEvaluator($this->db))->contacts($id); $this->db->commit(); flash('success','Segment saved.');
-        }catch(\Throwable $e){if($this->db->inTransaction())$this->db->rollBack();flash('error',$e->getMessage());if($wasNew)$id=null;}
-        redirect($id?"/email/segments/$id/edit":'/email/segments/create');
+        }catch(\Throwable $e){if($this->db->inTransaction())$this->db->rollBack();flash('error',$e->getMessage());redirect($wasNew?'/email/segments/create':"/email/segments/$id/edit");}
+        redirect("/email/segments/$id");
     }
 
     public function templates(): void { $templates=$this->db->query('SELECT * FROM email_templates ORDER BY lower(name)')->fetchAll(); render('email.templates',compact('templates'),'Email Templates'); }

@@ -44,7 +44,7 @@ npx tailwindcss -i src/css/app.css -o public/css/app.css --watch
 npx tailwindcss -i src/css/app.css -o public/css/app.css --minify
 ```
 
-No test suite currently. There are no linting commands configured.
+Tests: `composer test` (PHPUnit, `tests/` — currently email marketing only). There are no linting commands configured.
 
 ## Tech Stack
 
@@ -85,7 +85,7 @@ Request flow: `public/index.php` (front controller) → `src/bootstrap.php` (DB 
 - Controllers handle HTTP requests and delegate to models; no base controller class
 - Models extend `Models\Model` (raw PDO, no ORM)
 - Views are plain PHP templates; `src/Views/layouts/main.php` wraps app pages, `layouts/auth.php` wraps login/consent pages
-- Migrations are numbered SQL files in `migrations/` (currently 001–036) run in order by `scripts/migrate.php`, tracked in `_migrations`
+- Migrations are numbered SQL files in `migrations/` (currently 001–039) run in order by `scripts/migrate.php`, tracked in `_migrations`
 - Shared helpers live in `src/bootstrap.php`: `render()`, `redirect()`, `flash()`, `csrfToken/csrfField/csrfCheck()`, `e()`, `money()`, `formatCurrency()`, `formatDate()`, `statusBadge()`, `healthFlagLabel()`, `appUrl()`
 - Column feature-detection via `try { SELECT col LIMIT 0 } catch` is used to tolerate partially-migrated DBs — follow the same pattern for new columns
 
@@ -207,6 +207,15 @@ All optional — core CRM works without them. Config in per-integration tables (
   Coysh Digital brand header and palette by default. The shared wrapper is editable through
   Email Settings as Master HTML, but must retain the `{{logo}}`, `{{content}}`, and `{{footer}}`
   placeholders.
+  **Plain style:** `content_json.style = 'plain'` (set by the builder's Email style select; absent =
+  branded) makes `EmailRenderer::render()` skip the master HTML, logo and branded footer and emit a
+  bare left-aligned document with a one-line unsubscribe link — for sends that should read like a
+  personal email. It lives in the content JSON rather than a column so Duplicate, Save as template and
+  new-from-template carry it for free. The `List-Unsubscribe` headers are set by the transport either way.
+  **Segments:** `/email/segments/{id}` (`segmentShow()`, `SegmentEvaluator::members()`) lists who is in a
+  segment, who will actually receive and why the rest cannot be sent to; saving a segment lands there.
+  Rule field/operator labels live in `SegmentEvaluator::FIELDS`/`OPERATORS` (the form JS reads them).
+  The segment form's contact picker filters client-side and only *hides* rows, so hidden ticks still submit.
 
 ## MCP Server (migration 028)
 
@@ -282,4 +291,4 @@ attribute early.
 
 - New browser-form POST endpoints must call `csrfCheck()` and render `csrfField()` in their forms (legacy forms predate this; `/mcp`, `/oauth/token`, `/oauth/register` are correctly CSRF-exempt — no session semantics)
 - Never echo decrypted secrets into HTML (masked placeholder + empty value instead)
-- Next migration number: 037
+- Next migration number: 040

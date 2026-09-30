@@ -75,13 +75,30 @@ HTML;
         $fonts = ['Arial, sans-serif', 'Georgia, serif', 'Verdana, sans-serif', 'Tahoma, sans-serif'];
         $font = in_array($theme['font'] ?? '', $fonts, true) ? $theme['font'] : $fonts[0];
 
+        // "plain" drops the branded wrapper so the email reads like one typed in a mail client.
+        $plainStyle = ($content['style'] ?? '') === 'plain';
+        $unsubscribeUrl ??= '#';
+        $preheader = htmlspecialchars((string)($content['preheader'] ?? ''), ENT_QUOTES, 'UTF-8');
+        $preheaderHtml = $preheader !== '' ? '<div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;">' . $preheader . '</div>' : '';
+
         $rows = '';
         $plain = [];
         foreach (($content['blocks'] ?? []) as $block) {
             if (!is_array($block)) continue;
-            [$blockHtml, $blockText] = $this->renderBlock($block, $accent, $text);
-            if ($blockHtml !== '') $rows .= '<tr><td style="padding:12px 32px;">' . $blockHtml . '</td></tr>';
+            [$blockHtml, $blockText] = $plainStyle ? $this->renderPlainBlock($block) : $this->renderBlock($block, $accent, $text);
+            if ($blockHtml !== '') $rows .= $plainStyle ? $blockHtml : '<tr><td style="padding:12px 32px;">' . $blockHtml . '</td></tr>';
             if ($blockText !== '') $plain[] = $blockText;
+        }
+
+        if ($plainStyle) {
+            // The unsubscribe link is the one thing a marketing send cannot drop.
+            $html = '<!doctype html><html><head><meta charset="utf-8"></head><body>' . $preheaderHtml
+                . '<div style="font-family:Calibri,Arial,Helvetica,sans-serif;font-size:11pt;line-height:1.4;color:#000000;">' . $rows
+                . '<p style="margin:28px 0 0;font-size:9pt;color:#888888;">Don\'t want these emails? <a href="'
+                . htmlspecialchars($unsubscribeUrl, ENT_QUOTES, 'UTF-8') . '" style="color:#888888;text-decoration:underline;">Unsubscribe</a></p>'
+                . '</div></body></html>';
+            $plain[] = "Don't want these emails? Unsubscribe: " . $unsubscribeUrl;
+            return $this->personalise(['html' => $html, 'text' => trim(implode("\n\n", $plain))], $recipient, $unsubscribeUrl);
         }
 
         $config = $this->config();
@@ -91,7 +108,6 @@ HTML;
         $business = htmlspecialchars($businessName, ENT_QUOTES, 'UTF-8');
         $address = nl2br(htmlspecialchars((string)($config['business_address'] ?? ''), ENT_QUOTES, 'UTF-8'));
         $privacy = $this->safeUrl((string)($config['privacy_url'] ?? ''));
-        $unsubscribeUrl ??= '#';
         $safeUnsub = htmlspecialchars($unsubscribeUrl, ENT_QUOTES, 'UTF-8');
         $footer = '<tr><td style="padding:24px 32px;border-top:1px solid #d5ebf0;color:#526b74;font-size:12px;line-height:1.6;text-align:center;">'
             . $business . ($address !== '' ? '<br>' . $address : '')
@@ -99,8 +115,7 @@ HTML;
             . ($privacy ? ' &nbsp;·&nbsp; <a href="' . htmlspecialchars($privacy, ENT_QUOTES, 'UTF-8') . '" style="color:#264653;text-decoration:underline;">Privacy</a>' : '')
             . '</td></tr>';
 
-        $preheader = htmlspecialchars((string)($content['preheader'] ?? ''), ENT_QUOTES, 'UTF-8');
-        $logoUrl = $this->publicUrl((string)($config['logo_url'] ?? ''));
+        $logoUrl =$this->publicUrl((string)($config['logo_url'] ?? ''));
         $safeLogoUrl = htmlspecialchars($logoUrl, ENT_QUOTES, 'UTF-8');
         $logo = '<tr><td style="padding:28px 32px 18px;">'
             . '<a href="https://coysh.digital" style="text-decoration:none;"><img src="' . $safeLogoUrl . '" width="380" height="90" alt="Coysh Digital" style="display:block;width:380px;max-width:100%;height:auto;border:0;"></a></td></tr>';
@@ -113,7 +128,7 @@ HTML;
             '{{accent_colour}}' => $accent,
             '{{font}}' => htmlspecialchars($font, ENT_QUOTES, 'UTF-8'),
             '{{width}}' => (string)$width,
-            '{{preheader}}' => $preheader !== '' ? '<div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;">' . $preheader . '</div>' : '',
+            '{{preheader}}' => $preheaderHtml,
             '{{logo}}' => $logo,
             '{{content}}' => $rows,
             '{{footer}}' => $footer,
@@ -174,6 +189,46 @@ HTML;
                 $cells[] = '<td width="50%" valign="top" style="width:50%;padding:8px;">' . $inner . '</td>';
             }
             return ['<table role="presentation" class="email-columns" width="100%" cellspacing="0" cellpadding="0"><tr>' . implode('', $cells) . '</tr></table>', implode("\n", $texts)];
+        }
+        return ['', ''];
+    }
+
+    /** Same blocks with the design taken out: bold lines, ordinary links, stacked columns. */
+    private function renderPlainBlock(array $block): array
+    {
+        $type = $block['type'] ?? '';
+        $paragraph = fn(string $inner): string => '<p style="margin:0 0 12px;">' . $inner . '</p>';
+        if ($type === 'columns') {
+            $html = '';
+            $texts = [];
+            foreach (array_slice((array)($block['columns'] ?? []), 0, 2) as $column) {
+                foreach ((array)($column['blocks'] ?? []) as $child) {
+                    [$h, $t] = $this->renderPlainBlock((array)$child);
+                    $html .= $h;
+                    if ($t) $texts[] = $t;
+                }
+            }
+            return [$html, implode("\n", $texts)];
+        }
+        if ($type === 'divider') return ['<hr style="border:0;border-top:1px solid #cccccc;margin:16px 0;">', ''];
+        if ($type === 'spacer') return ['<br>', ''];
+
+        // The branded renderer validates the block and supplies the text part.
+        [$branded, $text] = $this->renderBlock($block, '#000000', '#000000');
+        if ($branded === '') return ['', ''];
+        if ($type === 'heading') return [$paragraph('<strong>' . htmlspecialchars((string)($block['text'] ?? ''), ENT_QUOTES, 'UTF-8') . '</strong>'), $text];
+        if ($type === 'text') return ['<div>' . $this->sanitiseRichText((string)($block['html'] ?? '')) . '</div>', $text];
+        if ($type === 'button') {
+            $url = htmlspecialchars((string)$this->safeUrl((string)($block['url'] ?? '')), ENT_QUOTES, 'UTF-8');
+            return [$paragraph('<a href="' . $url . '">' . htmlspecialchars((string)($block['text'] ?? 'Learn more'), ENT_QUOTES, 'UTF-8') . '</a>'), $text];
+        }
+        if ($type === 'image') {
+            $asset = $this->asset((int)($block['asset_id'] ?? 0));
+            $url = appUrl() . '/email/assets/' . rawurlencode($asset['public_token']) . '/' . rawurlencode($asset['original_name']);
+            $img = '<img src="' . htmlspecialchars($url, ENT_QUOTES, 'UTF-8') . '" alt="' . htmlspecialchars((string)($block['alt'] ?? $asset['alt_text'] ?? ''), ENT_QUOTES, 'UTF-8') . '" width="536" style="max-width:100%;height:auto;border:0;">';
+            $link = $this->safeUrl((string)($block['url'] ?? ''));
+            if ($link) $img = '<a href="' . htmlspecialchars($link, ENT_QUOTES, 'UTF-8') . '">' . $img . '</a>';
+            return [$paragraph($img), $text];
         }
         return ['', ''];
     }
