@@ -107,9 +107,11 @@ final class EmailController
 
     public function bulkEligibility(): void
     {
-        $this->csrf('/email/contacts');$ids=array_values(array_filter(array_unique(array_map('intval',(array)($_POST['contact_ids']??[])))));$basis=$_POST['basis']??'unknown';
-        if(!$ids||!in_array($basis,['unknown','consent','soft_opt_in','corporate_b2b'],true)){flash('error','Choose contacts and a valid eligibility basis.');redirect('/email/contacts');}
-        $source=trim($_POST['source']??'');$notes=trim($_POST['notes']??'');if($basis!=='unknown'&&$source===''){flash('error','An eligibility source is required for bulk review.');redirect('/email/contacts');}
+        // The segment members page posts here too and wants to land back on the segment.
+        $segmentId=(int)($_POST['segment_id']??0);$back=$segmentId>0?"/email/segments/$segmentId":'/email/contacts';
+        $this->csrf($back);$ids=array_values(array_filter(array_unique(array_map('intval',(array)($_POST['contact_ids']??[])))));$basis=$_POST['basis']??'unknown';
+        if(!$ids||!in_array($basis,['unknown','consent','soft_opt_in','corporate_b2b'],true)){flash('error','Choose contacts and a valid eligibility basis.');redirect($back);}
+        $source=trim($_POST['source']??'');$notes=trim($_POST['notes']??'');if($basis!=='unknown'&&$source===''){flash('error','An eligibility source is required for bulk review.');redirect($back);}
         $update=$this->db->prepare('UPDATE marketing_contacts SET eligibility_basis=?,eligibility_at=?,eligibility_source=?,eligibility_notes=?,updated_at=datetime(\'now\') WHERE id=?');
         $event=$this->db->prepare('INSERT INTO marketing_consent_events(contact_id,event_type,basis,source,notes,user_id) VALUES (?,?,?,?,?,?)');
         $reviewed=0;
@@ -127,7 +129,7 @@ final class EmailController
             if($this->db->inTransaction())$this->db->rollBack();
             flash('error','The bulk review could not be saved: '.$e->getMessage());
         }
-        redirect('/email/contacts');
+        redirect($back);
     }
 
     public function clearSuppression(int $id): void
